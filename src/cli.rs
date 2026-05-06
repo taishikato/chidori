@@ -8,30 +8,31 @@ use url::Url;
 #[command(version)]
 #[command(about = "Fast Rust-built web-to-Markdown fetcher for coding agents")]
 pub struct Cli {
+    #[arg(help = "HTTP or HTTPS URL to fetch")]
     pub url: String,
 
-    #[arg(long)]
+    #[arg(long, help = "Output metadata and Markdown as JSON")]
     pub json: bool,
 
-    #[arg(short, long)]
+    #[arg(short, long, help = "Write output to a file")]
     pub output: Option<PathBuf>,
 
-    #[arg(long)]
+    #[arg(long, help = "Truncate Markdown to a maximum character count")]
     pub max_chars: Option<usize>,
 
-    #[arg(long, default_value_t = 10_000)]
+    #[arg(long, default_value_t = 10_000, help = "Set fetch timeout in milliseconds")]
     pub timeout: u64,
 
-    #[arg(long)]
+    #[arg(long, help = "Override the User-Agent header")]
     pub user_agent: Option<String>,
 
-    #[arg(short = 'l', long = "lang")]
+    #[arg(short = 'l', long = "lang", help = "Set Accept-Language")]
     pub lang: Option<String>,
 
-    #[arg(long)]
+    #[arg(long, help = "Remove images from Markdown output")]
     pub no_images: bool,
 
-    #[arg(long)]
+    #[arg(long, help = "Emit extraction diagnostics and timing information")]
     pub debug: bool,
 }
 
