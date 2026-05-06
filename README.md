@@ -3,7 +3,7 @@
 A fast Rust-built web-to-Markdown fetcher for coding agents.
 
 ```bash
-npx chidori https://example.com/page
+npx chidori https://example.com
 ```
 
 `chidori` fetches a URL, extracts the main readable content, removes page noise, and prints Markdown to stdout by default. Logs and errors go to stderr so agents and shell scripts can safely pipe stdout into prompts, files, or other tools.
@@ -11,12 +11,12 @@ npx chidori https://example.com/page
 ## Usage
 
 ```bash
-chidori https://example.com/article
-chidori https://example.com/article --json
-chidori https://example.com/article --output article.md
-chidori https://example.com/article --max-chars 20000
-chidori https://example.com/article --lang ja
-chidori https://example.com/article --no-images
+chidori https://example.com
+chidori https://example.com --json
+chidori https://example.com --output article.md
+chidori https://example.com --max-chars 20000
+chidori https://example.com --lang ja
+chidori https://example.com --no-images
 ```
 
 ## Why
