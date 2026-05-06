@@ -90,6 +90,35 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
         lang: config.lang.clone(),
     };
     let page = fetch_url(&config.url, &fetch_config).await?;
-    println!("{}", page.body);
-    Ok(())
+    let doc = crate::document::ParsedDocument::parse(page.body, page.final_url.clone());
+    let mut metadata = crate::metadata::extract_metadata(&doc);
+    metadata.url = config.url.to_string();
+    metadata.final_url = page.final_url.to_string();
+
+    let main_html = crate::extractor::extract_main_html(&doc)?;
+    let cleaned = crate::cleaner::clean_html(
+        &main_html,
+        &crate::cleaner::CleanOptions {
+            no_images: config.no_images,
+        },
+    );
+    let markdown = crate::markdown::html_to_markdown(
+        &cleaned,
+        &crate::markdown::MarkdownOptions {
+            max_chars: config.max_chars,
+        },
+    );
+
+    if markdown.trim().is_empty() {
+        return Err(ChidoriError::ExtractionFailed);
+    }
+
+    metadata.word_count = markdown.split_whitespace().count();
+    let mode = if config.json {
+        crate::output::RenderMode::Json
+    } else {
+        crate::output::RenderMode::Markdown
+    };
+    let rendered = crate::output::render_output(&metadata, &markdown, mode)?;
+    crate::output::write_output(config.output.as_deref(), &rendered)
 }
