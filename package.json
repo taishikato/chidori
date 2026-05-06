@@ -7,12 +7,15 @@
   },
   "files": [
     "bin",
-    "target/release/chidori",
+    "src",
+    "Cargo.toml",
+    "Cargo.lock",
     "README.md"
   ],
   "scripts": {
     "build": "cargo build --release",
     "test": "cargo test",
+    "install": "cargo build --release",
     "prepack": "npm run build"
   },
   "keywords": [

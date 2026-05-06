@@ -21,4 +21,8 @@ if (result.error) {
   console.error(`Error: ${result.error.message}`);
   process.exit(8);
 }
+if (result.signal && result.status === null) {
+  console.error(`Error: chidori terminated by signal ${result.signal}`);
+  process.exit(1);
+}
 process.exit(result.status ?? 1);
