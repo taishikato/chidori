@@ -17,10 +17,13 @@ fn extracts_basic_metadata() {
     let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
     let metadata = extract_metadata(&doc);
 
+    assert_eq!(metadata.url, "https://example.com/post");
+    assert_eq!(metadata.final_url, "https://example.com/post");
     assert_eq!(metadata.title, "Article Title");
     assert_eq!(metadata.description, "A useful article");
     assert_eq!(metadata.site, "Example Site");
     assert_eq!(metadata.author, "Ada Lovelace");
     assert_eq!(metadata.published, "2026-05-06");
     assert_eq!(metadata.language, "en");
+    assert_eq!(metadata.word_count, 0);
 }
