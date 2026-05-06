@@ -4,4 +4,5 @@ pub mod document;
 pub mod error;
 pub mod extractor;
 pub mod fetcher;
+pub mod markdown;
 pub mod metadata;

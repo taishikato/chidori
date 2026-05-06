@@ -2,6 +2,7 @@ use chidori::{
     cleaner::{clean_html, CleanOptions},
     document::ParsedDocument,
     extractor::extract_main_html,
+    markdown::{html_to_markdown, MarkdownOptions},
     metadata::extract_metadata,
 };
 use url::Url;
@@ -173,4 +174,32 @@ fn removes_picture_when_images_disabled() {
     assert!(!cleaned.contains("<source"));
     assert!(!cleaned.contains("<img"));
     assert!(!cleaned.contains("</picture>"));
+}
+
+#[test]
+fn converts_html_to_agent_friendly_markdown() {
+    let html = r#"
+    <article>
+      <h1>Title</h1>
+      <p>Hello <strong>world</strong>.</p>
+      <pre><code class="language-rust">fn main() {}</code></pre>
+    </article>"#;
+
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+    assert!(markdown.contains("# Title"));
+    assert!(markdown.contains("**world**"));
+    assert!(markdown.contains("```"));
+    assert!(markdown.contains("fn main() {}"));
+}
+
+#[test]
+fn truncates_markdown_when_max_chars_is_set() {
+    let html = "<article><p>abcdefghijklmnopqrstuvwxyz</p></article>";
+    let markdown = html_to_markdown(
+        html,
+        &MarkdownOptions {
+            max_chars: Some(10),
+        },
+    );
+    assert_eq!(markdown.chars().count(), 10);
 }
