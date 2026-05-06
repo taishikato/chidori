@@ -1,4 +1,9 @@
-use chidori::{document::ParsedDocument, extractor::extract_main_html, metadata::extract_metadata};
+use chidori::{
+    cleaner::{clean_html, CleanOptions},
+    document::ParsedDocument,
+    extractor::extract_main_html,
+    metadata::extract_metadata,
+};
 use url::Url;
 
 #[test]
@@ -100,4 +105,24 @@ fn skips_empty_candidates() {
 
     assert!(main.contains("FallbackLink"));
     assert!(!main.contains("<article"));
+}
+
+#[test]
+fn removes_noise_and_optionally_images() {
+    let html = r#"
+    <article>
+      <script>alert(1)</script>
+      <style>.x{}</style>
+      <p>Keep this paragraph.</p>
+      <aside>Related links</aside>
+      <img src="/hero.png" alt="Hero">
+      <button>Share</button>
+    </article>"#;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: true });
+    assert!(cleaned.contains("Keep this paragraph."));
+    assert!(!cleaned.contains("script"));
+    assert!(!cleaned.contains("Related links"));
+    assert!(!cleaned.contains("<img"));
+    assert!(!cleaned.contains("Share"));
 }

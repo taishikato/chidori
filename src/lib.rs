@@ -1,3 +1,4 @@
+pub mod cleaner;
 pub mod cli;
 pub mod document;
 pub mod error;
