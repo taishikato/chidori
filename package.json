@@ -1,5 +1,5 @@
 {
-  "name": "chidori",
+  "name": "@taishikato/chidori",
   "version": "0.1.0",
   "description": "Fast Rust-built web-to-Markdown fetcher for coding agents",
   "bin": {
