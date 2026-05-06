@@ -43,3 +43,29 @@ fn extracts_article_over_navigation() {
     assert!(main.contains("useful article body"));
     assert!(!main.contains("Copyright"));
 }
+
+#[test]
+fn extracts_zero_score_candidate() {
+    let html = r#"
+    <html><body>
+      <article><a href="/x">OnlyLink</a></article>
+    </body></html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("OnlyLink"));
+}
+
+#[test]
+fn prefers_less_negative_score_candidate() {
+    let html = r#"
+    <html><body>
+      <article><a href="/x">OnlyLink</a></article>
+      <main><a href="/y">BetterLink</a> extra</main>
+    </body></html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("BetterLink"));
+    assert!(!main.contains("OnlyLink"));
+}
