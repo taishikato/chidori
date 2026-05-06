@@ -1,6 +1,8 @@
 use crate::error::ChidoriError;
+use crate::fetcher::{fetch_url, FetchConfig, DEFAULT_USER_AGENT};
 use clap::Parser;
 use std::path::PathBuf;
+use std::time::Duration;
 use url::Url;
 
 #[derive(Debug, Parser)]
@@ -20,7 +22,11 @@ pub struct Cli {
     #[arg(long, help = "Truncate Markdown to a maximum character count")]
     pub max_chars: Option<usize>,
 
-    #[arg(long, default_value_t = 10_000, help = "Set fetch timeout in milliseconds")]
+    #[arg(
+        long,
+        default_value_t = 10_000,
+        help = "Set fetch timeout in milliseconds"
+    )]
     pub timeout: u64,
 
     #[arg(long, help = "Override the User-Agent header")]
@@ -73,8 +79,17 @@ impl TryFrom<Cli> for RunConfig {
 }
 
 pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
-    let _config = RunConfig::try_from(cli)?;
-    Err(ChidoriError::Unknown(
-        "pipeline not implemented".to_string(),
-    ))
+    let config = RunConfig::try_from(cli)?;
+    let fetch_config = FetchConfig {
+        timeout: Duration::from_millis(config.timeout),
+        max_bytes: 5 * 1024 * 1024,
+        user_agent: config
+            .user_agent
+            .clone()
+            .unwrap_or_else(|| DEFAULT_USER_AGENT.to_string()),
+        lang: config.lang.clone(),
+    };
+    let page = fetch_url(&config.url, &fetch_config).await?;
+    println!("{}", page.body);
+    Ok(())
 }
