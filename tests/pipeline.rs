@@ -1,4 +1,4 @@
-use chidori::{document::ParsedDocument, metadata::extract_metadata};
+use chidori::{document::ParsedDocument, extractor::extract_main_html, metadata::extract_metadata};
 use url::Url;
 
 #[test]
@@ -26,4 +26,20 @@ fn extracts_basic_metadata() {
     assert_eq!(metadata.published, "2026-05-06");
     assert_eq!(metadata.language, "en");
     assert_eq!(metadata.word_count, 0);
+}
+
+#[test]
+fn extracts_article_over_navigation() {
+    let html = r#"
+    <html><body>
+      <nav><a href="/a">Home</a><a href="/b">Docs</a></nav>
+      <article><h1>Real Title</h1><p>This is the useful article body with enough words to win scoring.</p></article>
+      <footer>Copyright</footer>
+    </body></html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("Real Title"));
+    assert!(main.contains("useful article body"));
+    assert!(!main.contains("Copyright"));
 }

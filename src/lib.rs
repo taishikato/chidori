@@ -1,5 +1,6 @@
 pub mod cli;
 pub mod document;
 pub mod error;
+pub mod extractor;
 pub mod fetcher;
 pub mod metadata;
