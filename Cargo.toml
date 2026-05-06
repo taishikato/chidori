@@ -1,0 +1,28 @@
+[package]
+name = "chidori"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Fast Rust-built web-to-Markdown fetcher for coding agents"
+
+[[bin]]
+name = "chidori"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+tokio = { version = "1.40", features = ["macros", "rt-multi-thread", "time"] }
+reqwest = { version = "0.12", features = ["charset", "gzip", "brotli", "deflate", "rustls-tls"], default-features = false }
+scraper = "0.20"
+html2md = "0.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+url = "2.5"
+html-escape = "0.2"
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.1"
+tempfile = "3.12"
+wiremock = "0.6"

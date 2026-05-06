@@ -1,0 +1,27 @@
+{
+  "name": "chidori",
+  "version": "0.1.0",
+  "description": "Fast Rust-built web-to-Markdown fetcher for coding agents",
+  "bin": {
+    "chidori": "bin/chidori.js"
+  },
+  "files": [
+    "bin",
+    "target/release/chidori",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "cargo build --release",
+    "test": "cargo test",
+    "prepack": "npm run build"
+  },
+  "keywords": [
+    "markdown",
+    "rust",
+    "cli",
+    "agent",
+    "web",
+    "fetch"
+  ],
+  "license": "MIT"
+}
