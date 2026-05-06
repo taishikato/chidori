@@ -126,3 +126,51 @@ fn removes_noise_and_optionally_images() {
     assert!(!cleaned.contains("<img"));
     assert!(!cleaned.contains("Share"));
 }
+
+#[test]
+fn removes_nested_noise_tags() {
+    let html = r#"
+    <article>
+      <p>Keep this paragraph.</p>
+      <ASIDE><ASIDE>inner</ASIDE>outer</ASIDE>
+    </article>"#;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    assert!(cleaned.contains("Keep this paragraph."));
+    assert!(!cleaned.contains("inner"));
+    assert!(!cleaned.contains("outer"));
+    assert!(!cleaned.contains("</aside>"));
+    assert!(!cleaned.contains("</ASIDE>"));
+}
+
+#[test]
+fn keeps_images_when_allowed() {
+    let html = r#"
+    <article>
+      <p>Keep this paragraph.</p>
+      <img src="/hero.png" alt="Hero">
+    </article>"#;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    assert!(cleaned.contains("Keep this paragraph."));
+    assert!(cleaned.contains("<img"));
+}
+
+#[test]
+fn removes_picture_when_images_disabled() {
+    let html = r#"
+    <article>
+      <p>Keep this paragraph.</p>
+      <picture>
+        <source srcset="/hero.webp" type="image/webp">
+        <img src="/hero.png" alt="Hero">
+      </picture>
+    </article>"#;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: true });
+    assert!(cleaned.contains("Keep this paragraph."));
+    assert!(!cleaned.contains("<picture"));
+    assert!(!cleaned.contains("<source"));
+    assert!(!cleaned.contains("<img"));
+    assert!(!cleaned.contains("</picture>"));
+}
