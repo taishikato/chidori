@@ -69,3 +69,35 @@ fn prefers_less_negative_score_candidate() {
     assert!(main.contains("BetterLink"));
     assert!(!main.contains("OnlyLink"));
 }
+
+#[test]
+fn body_does_not_beat_article() {
+    let html = r#"
+    <html><body>
+      <article><p>Focused article content.</p></article>
+      <aside>
+        Sidebar filler text with many many many many many many many many many many extra words.
+      </aside>
+      <footer>Unrelated footer text that should not be included in extracted output.</footer>
+    </body></html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("Focused article content"));
+    assert!(!main.contains("Sidebar filler text"));
+    assert!(!main.contains("Unrelated footer text"));
+}
+
+#[test]
+fn skips_empty_candidates() {
+    let html = r#"
+    <html><body>
+      <article><span></span></article>
+      <main><a href="/fallback">FallbackLink</a></main>
+    </body></html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("FallbackLink"));
+    assert!(!main.contains("<article"));
+}

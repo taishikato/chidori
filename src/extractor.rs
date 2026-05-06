@@ -11,23 +11,41 @@ const ENTRY_SELECTORS: &[&str] = &[
     ".entry-content",
     ".article-content",
     "#content",
-    "body",
 ];
 
 pub fn extract_main_html(doc: &ParsedDocument) -> Result<String, ChidoriError> {
+    let link_selector =
+        Selector::parse("a").map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let mut best_candidate = best_candidate_for_selectors(doc, ENTRY_SELECTORS, &link_selector)?;
+
+    if best_candidate.is_none() {
+        best_candidate = best_candidate_for_selectors(doc, &["body"], &link_selector)?;
+    }
+
+    best_candidate
+        .map(|(_, html)| html)
+        .ok_or(ChidoriError::ExtractionFailed)
+}
+
+fn best_candidate_for_selectors(
+    doc: &ParsedDocument,
+    raw_selectors: &[&str],
+    link_selector: &Selector,
+) -> Result<Option<(isize, String)>, ChidoriError> {
     let mut best_candidate: Option<(isize, String)> = None;
 
-    for raw_selector in ENTRY_SELECTORS {
+    for raw_selector in raw_selectors {
         let selector = Selector::parse(raw_selector)
             .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
         for element in doc.dom.select(&selector) {
             let text = element.text().collect::<Vec<_>>().join(" ");
-            let link_count = element.select(&Selector::parse("a").unwrap()).count();
-            let score = text.split_whitespace().count() as isize - (link_count * 3) as isize;
-            let html = element.html();
-            if html.trim().is_empty() {
+            let word_count = text.split_whitespace().count();
+            if word_count == 0 {
                 continue;
             }
+            let link_count = element.select(link_selector).count();
+            let score = word_count as isize - (link_count * 3) as isize;
+            let html = element.html();
             if best_candidate
                 .as_ref()
                 .is_none_or(|(best_score, _)| score > *best_score)
@@ -37,7 +55,5 @@ pub fn extract_main_html(doc: &ParsedDocument) -> Result<String, ChidoriError> {
         }
     }
 
-    best_candidate
-        .map(|(_, html)| html)
-        .ok_or(ChidoriError::ExtractionFailed)
+    Ok(best_candidate)
 }
