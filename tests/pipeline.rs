@@ -8,6 +8,14 @@ use chidori::{
 };
 use url::Url;
 
+fn fixture_to_markdown(name: &str) -> String {
+    let html = std::fs::read_to_string(format!("tests/fixtures/{name}")).unwrap();
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com").unwrap());
+    let main = extract_main_html(&doc).unwrap();
+    let cleaned = clean_html(&main, &CleanOptions { no_images: false });
+    html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None })
+}
+
 #[test]
 fn extracts_basic_metadata() {
     let html = r#"<!doctype html>
@@ -214,6 +222,33 @@ fn does_not_normalize_setext_inside_code_block() {
     assert!(markdown.contains("```\ntitle\n---\n```"));
     assert!(!markdown.contains("## title"));
     assert!(!markdown.contains("# title"));
+}
+
+#[test]
+fn fixture_basic_article_preserves_content() {
+    let markdown = fixture_to_markdown("basic_article.html");
+
+    assert!(markdown.contains("# Basic Article"));
+    assert!(markdown.contains("useful content for a coding agent"));
+}
+
+#[test]
+fn fixture_noisy_article_removes_boilerplate() {
+    let markdown = fixture_to_markdown("noisy_article.html");
+
+    assert!(markdown.contains("# Noisy Article"));
+    assert!(markdown.contains("survive cleanup"));
+    assert!(!markdown.contains("Navigation"));
+    assert!(!markdown.contains("Related posts"));
+    assert!(!markdown.contains("Share"));
+}
+
+#[test]
+fn fixture_code_article_preserves_code() {
+    let markdown = fixture_to_markdown("code_article.html");
+
+    assert!(markdown.contains("# Code Article"));
+    assert!(markdown.contains("const value"));
 }
 
 #[test]
