@@ -70,7 +70,7 @@ pub async fn fetch_url(url: &Url, config: &FetchConfig) -> Result<FetchedPage, C
         .and_then(|value| value.to_str().ok())
         .unwrap_or("")
         .to_string();
-    if !content_type.contains("text/html") && !content_type.contains("application/xhtml+xml") {
+    if !is_supported_html_content_type(&content_type) {
         return Err(ChidoriError::UnsupportedContentType(content_type));
     }
 
@@ -86,14 +86,28 @@ pub async fn fetch_url(url: &Url, config: &FetchConfig) -> Result<FetchedPage, C
         }
     }
 
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|error| ChidoriError::FetchFailed(error.to_string()))?;
+    let bytes = response.bytes().await.map_err(|error| {
+        if error.is_timeout() {
+            ChidoriError::Timeout(config.timeout.as_millis() as u64)
+        } else {
+            ChidoriError::FetchFailed(error.to_string())
+        }
+    })?;
     if bytes.len() as u64 > config.max_bytes {
         return Err(ChidoriError::TooLarge(bytes.len() as u64, config.max_bytes));
     }
 
     let body = String::from_utf8_lossy(&bytes).to_string();
     Ok(FetchedPage { final_url, body })
+}
+
+fn is_supported_html_content_type(content_type: &str) -> bool {
+    let media_type = content_type
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+
+    matches!(media_type.as_str(), "text/html" | "application/xhtml+xml")
 }
