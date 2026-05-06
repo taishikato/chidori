@@ -6,3 +6,4 @@ pub mod extractor;
 pub mod fetcher;
 pub mod markdown;
 pub mod metadata;
+pub mod output;

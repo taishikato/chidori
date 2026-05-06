@@ -3,7 +3,8 @@ use chidori::{
     document::ParsedDocument,
     extractor::extract_main_html,
     markdown::{html_to_markdown, MarkdownOptions},
-    metadata::extract_metadata,
+    metadata::{extract_metadata, Metadata},
+    output::{render_output, RenderMode},
 };
 use url::Url;
 
@@ -213,4 +214,29 @@ fn does_not_normalize_setext_inside_code_block() {
     assert!(markdown.contains("```\ntitle\n---\n```"));
     assert!(!markdown.contains("## title"));
     assert!(!markdown.contains("# title"));
+}
+
+#[test]
+fn renders_plain_markdown_by_default() {
+    let metadata = Metadata {
+        title: "Title".to_string(),
+        word_count: 2,
+        ..Metadata::default()
+    };
+    let output = render_output(&metadata, "Hello world", RenderMode::Markdown).unwrap();
+    assert_eq!(output, "Hello world");
+}
+
+#[test]
+fn renders_json_with_markdown() {
+    let metadata = Metadata {
+        url: "https://example.com".to_string(),
+        final_url: "https://example.com".to_string(),
+        title: "Title".to_string(),
+        word_count: 2,
+        ..Metadata::default()
+    };
+    let output = render_output(&metadata, "Hello world", RenderMode::Json).unwrap();
+    assert!(output.contains("\"title\": \"Title\""));
+    assert!(output.contains("\"markdown\": \"Hello world\""));
 }
