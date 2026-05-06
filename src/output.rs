@@ -30,9 +30,11 @@ pub fn render_output(
 
 pub fn write_output(path: Option<&Path>, output: &str) -> Result<(), ChidoriError> {
     if let Some(path) = path {
-        fs::write(path, output).map_err(|error| ChidoriError::OutputFailed(error.to_string()))?;
+        fs::write(path, output).map_err(|error| {
+            ChidoriError::OutputFailed(format!("failed to write {}: {}", path.display(), error))
+        })?;
     } else {
-        println!("{}", output);
+        print!("{}", output);
     }
     Ok(())
 }

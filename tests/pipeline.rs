@@ -237,6 +237,11 @@ fn renders_json_with_markdown() {
         ..Metadata::default()
     };
     let output = render_output(&metadata, "Hello world", RenderMode::Json).unwrap();
-    assert!(output.contains("\"title\": \"Title\""));
-    assert!(output.contains("\"markdown\": \"Hello world\""));
+    let json = serde_json::from_str::<serde_json::Value>(&output).unwrap();
+
+    assert_eq!(json["title"], "Title");
+    assert_eq!(json["url"], "https://example.com");
+    assert_eq!(json["finalUrl"], "https://example.com");
+    assert_eq!(json["wordCount"], 2);
+    assert_eq!(json["markdown"], "Hello world");
 }
