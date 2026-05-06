@@ -25,8 +25,22 @@ fn normalize_setext_headings(markdown: &str) -> String {
     let lines = markdown.lines().collect::<Vec<_>>();
     let mut normalized = Vec::with_capacity(lines.len());
     let mut index = 0;
+    let mut in_fence = false;
 
     while index < lines.len() {
+        if is_backtick_fence(lines[index]) {
+            in_fence = !in_fence;
+            normalized.push(lines[index].to_string());
+            index += 1;
+            continue;
+        }
+
+        if in_fence {
+            normalized.push(lines[index].to_string());
+            index += 1;
+            continue;
+        }
+
         if let Some(next) = lines.get(index + 1) {
             let marker = next.trim();
             if !lines[index].trim().is_empty()
@@ -52,4 +66,9 @@ fn normalize_setext_headings(markdown: &str) -> String {
     }
 
     normalized.join("\n")
+}
+
+fn is_backtick_fence(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with("```")
 }

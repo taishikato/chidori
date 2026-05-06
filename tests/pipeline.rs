@@ -203,3 +203,14 @@ fn truncates_markdown_when_max_chars_is_set() {
     );
     assert_eq!(markdown.chars().count(), 10);
 }
+
+#[test]
+fn does_not_normalize_setext_inside_code_block() {
+    let html = "<article><pre><code>title\n---</code></pre></article>";
+
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("```\ntitle\n---\n```"));
+    assert!(!markdown.contains("## title"));
+    assert!(!markdown.contains("# title"));
+}
