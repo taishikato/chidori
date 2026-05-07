@@ -26,6 +26,7 @@ const PRIMARY_ENTRY_SELECTORS: &[&str] = &[
 const BODY_FALLBACK_SELECTORS: &[&str] = &["body"];
 const LOW_WORD_COUNT_RETRY_THRESHOLD: usize = 50;
 const RETRY_MIN_GAIN_MULTIPLIER: usize = 2;
+const ARTICLE_RETRY_PROTECTION_MIN_WORDS: usize = 10;
 
 #[derive(Debug, Clone)]
 struct Candidate {
@@ -62,7 +63,10 @@ pub fn extract_main_html(doc: &ParsedDocument) -> Result<String, ChidoriError> {
 
     if let Some(candidate_word_count) = best_candidate
         .as_ref()
-        .filter(|candidate| candidate.word_count < LOW_WORD_COUNT_RETRY_THRESHOLD)
+        .filter(|candidate| {
+            candidate.word_count < LOW_WORD_COUNT_RETRY_THRESHOLD
+                && !is_protected_article_candidate(candidate)
+        })
         .map(|candidate| candidate.word_count)
     {
         if let Some(body_candidate) =
@@ -77,6 +81,15 @@ pub fn extract_main_html(doc: &ParsedDocument) -> Result<String, ChidoriError> {
     best_candidate
         .map(|candidate| candidate.html)
         .ok_or(ChidoriError::ExtractionFailed)
+}
+
+fn is_protected_article_candidate(candidate: &Candidate) -> bool {
+    if candidate.word_count < ARTICLE_RETRY_PROTECTION_MIN_WORDS {
+        return false;
+    }
+
+    let html = candidate.html.to_ascii_lowercase();
+    html.contains("<article") || html.contains("role=\"article\"")
 }
 
 fn score_element(element: ElementRef<'_>, selectors: &ScoringSelectors) -> (isize, usize) {
