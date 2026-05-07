@@ -126,6 +126,25 @@ fn body_does_not_beat_article() {
 }
 
 #[test]
+fn body_fallback_does_not_compete_with_primary_candidates() {
+    let filler = "sidebar noise ".repeat(260);
+    let html = format!(
+        r#"
+    <html><body>
+      <article><p>Focused article content.</p></article>
+      <aside>{filler}</aside>
+      <footer>Footer text that should not be included.</footer>
+    </body></html>"#
+    );
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("Focused article content"));
+    assert!(!main.contains("sidebar noise"));
+    assert!(!main.contains("Footer text"));
+}
+
+#[test]
 fn skips_empty_candidates() {
     let html = r#"
     <html><body>
