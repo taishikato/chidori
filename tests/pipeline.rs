@@ -154,6 +154,17 @@ fn removes_nested_noise_tags() {
 }
 
 #[test]
+fn cleaner_treats_non_ascii_less_than_text_as_text() {
+    let html =
+        "<article><p>Keep this.</p><p>It<’s text, not a tag.</p><p>Use <— as text.</p></article>";
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+
+    assert!(cleaned.contains("It<’s text"));
+    assert!(cleaned.contains("Use <— as text"));
+}
+
+#[test]
 fn keeps_images_when_allowed() {
     let html = r#"
     <article>

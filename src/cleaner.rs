@@ -84,20 +84,21 @@ fn find_matching_close(html: &str, tag: &str, search_start: usize) -> Option<usi
 }
 
 fn tag_name_matches(input: &str, tag: &str) -> bool {
-    input.len() >= tag.len()
-        && input[..tag.len()].eq_ignore_ascii_case(tag)
-        && input[tag.len()..]
-            .chars()
-            .next()
-            .is_some_and(|ch| ch.is_ascii_whitespace() || ch == '>' || ch == '/')
+    let mut chars = input.chars();
+    for expected in tag.chars() {
+        match chars.next() {
+            Some(actual) if actual.eq_ignore_ascii_case(&expected) => {}
+            _ => return false,
+        }
+    }
+
+    chars
+        .next()
+        .is_some_and(|ch| ch.is_ascii_whitespace() || ch == '>' || ch == '/')
 }
 
 fn closing_tag_name_matches(input: &str, tag: &str) -> bool {
-    input.starts_with('/')
-        && input.len() > tag.len()
-        && input[1..1 + tag.len()].eq_ignore_ascii_case(tag)
-        && input[1 + tag.len()..]
-            .chars()
-            .next()
-            .is_some_and(|ch| ch.is_ascii_whitespace() || ch == '>')
+    input
+        .strip_prefix('/')
+        .is_some_and(|rest| tag_name_matches(rest, tag))
 }

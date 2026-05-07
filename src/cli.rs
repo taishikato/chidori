@@ -2,7 +2,7 @@ use crate::error::ChidoriError;
 use crate::fetcher::{fetch_url, FetchConfig, DEFAULT_USER_AGENT};
 use clap::Parser;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use url::Url;
 
 #[derive(Debug, Parser)]
@@ -79,6 +79,7 @@ impl TryFrom<Cli> for RunConfig {
 }
 
 pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
+    let started = Instant::now();
     let config = RunConfig::try_from(cli)?;
     let fetch_config = FetchConfig {
         timeout: Duration::from_millis(config.timeout),
@@ -90,6 +91,14 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
         lang: config.lang.clone(),
     };
     let page = fetch_url(&config.url, &fetch_config).await?;
+    if config.debug {
+        eprintln!(
+            "debug: fetched {} in {} ms",
+            page.final_url,
+            started.elapsed().as_millis()
+        );
+    }
+
     let doc = crate::document::ParsedDocument::parse(page.body, page.final_url.clone());
     let mut metadata = crate::metadata::extract_metadata(&doc);
     metadata.url = config.url.to_string();
@@ -114,6 +123,14 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
     }
 
     metadata.word_count = markdown.split_whitespace().count();
+    if config.debug {
+        eprintln!(
+            "debug: extracted {} words in {} ms",
+            metadata.word_count,
+            started.elapsed().as_millis()
+        );
+    }
+
     let mode = if config.json {
         crate::output::RenderMode::Json
     } else {
