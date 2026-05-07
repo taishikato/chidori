@@ -203,6 +203,27 @@ fn retries_with_body_when_entry_candidate_is_too_short() {
 }
 
 #[test]
+fn retries_short_article_placeholder_when_body_has_structured_content() {
+    let html = r#"
+    <html><body>
+      <article><p>Article shell has teaser words but not the loaded documentation content.</p></article>
+      <div class="docs-page">
+        <h1>Runtime Rendered Documentation</h1>
+        <p>This useful documentation section lives outside common article selectors.</p>
+        <p>The retry path should recover it when the first entry candidate is tiny.</p>
+        <p>Agents need this text because otherwise the fetched page is almost empty.</p>
+      </div>
+    </body></html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/docs").unwrap());
+
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("Runtime Rendered Documentation"));
+    assert!(main.contains("Article shell has teaser words"));
+    assert!(main.contains("Agents need this text"));
+}
+
+#[test]
 fn removes_noise_and_optionally_images() {
     let html = r#"
     <article>
