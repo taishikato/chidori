@@ -33,7 +33,7 @@ struct Candidate {
     score: isize,
     selector_index: usize,
     word_count: usize,
-    paragraph_count: usize,
+    content_block_count: usize,
     html: String,
 }
 
@@ -41,6 +41,7 @@ struct ScoringSelectors {
     links: Selector,
     paragraphs: Selector,
     images: Selector,
+    body_content_blocks: Selector,
 }
 
 fn selector_priority(selector_count: usize, selector_index: usize) -> isize {
@@ -53,6 +54,10 @@ pub fn extract_main_html(doc: &ParsedDocument) -> Result<String, ChidoriError> {
         paragraphs: Selector::parse("p")
             .map_err(|error| ChidoriError::Unknown(error.to_string()))?,
         images: Selector::parse("img").map_err(|error| ChidoriError::Unknown(error.to_string()))?,
+        body_content_blocks: Selector::parse(
+            "body > article, body > main, body > section, body > div",
+        )
+        .map_err(|error| ChidoriError::Unknown(error.to_string()))?,
     };
 
     let mut best_candidate =
@@ -98,15 +103,19 @@ fn should_retry_with_body(candidate: &Candidate, body_candidate: &Candidate) -> 
         return true;
     }
 
-    body_candidate.paragraph_count > candidate.paragraph_count + 1
+    body_candidate.content_block_count > 1
 }
 
-fn score_element(element: ElementRef<'_>, selectors: &ScoringSelectors) -> (isize, usize, usize) {
+fn score_element(
+    element: ElementRef<'_>,
+    selectors: &ScoringSelectors,
+) -> (isize, usize, usize, usize) {
     let text = element.text().collect::<Vec<_>>().join(" ");
     let word_count = text.split_whitespace().count();
     let paragraph_count = element.select(&selectors.paragraphs).count();
+    let content_block_count = element.select(&selectors.body_content_blocks).count();
     if word_count == 0 {
-        return (0, 0, paragraph_count);
+        return (0, 0, paragraph_count, content_block_count);
     }
 
     let comma_count = text.matches(',').count();
@@ -156,7 +165,7 @@ fn score_element(element: ElementRef<'_>, selectors: &ScoringSelectors) -> (isiz
     let link_density = (link_text_len as f64 / text_len as f64).min(0.5);
     score = ((score as f64) * (1.0 - link_density)).round() as isize;
 
-    (score, word_count, paragraph_count)
+    (score, word_count, paragraph_count, content_block_count)
 }
 
 fn best_candidate_for_selectors(
@@ -170,7 +179,8 @@ fn best_candidate_for_selectors(
         let selector = Selector::parse(raw_selector)
             .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
         for element in doc.dom.select(&selector) {
-            let (content_score, word_count, paragraph_count) = score_element(element, selectors);
+            let (content_score, word_count, _paragraph_count, content_block_count) =
+                score_element(element, selectors);
             if word_count == 0 {
                 continue;
             }
@@ -179,7 +189,7 @@ fn best_candidate_for_selectors(
                 score,
                 selector_index,
                 word_count,
-                paragraph_count,
+                content_block_count,
                 html: element.html(),
             };
             if best_candidate.as_ref().is_none_or(|best_candidate| {
@@ -208,6 +218,10 @@ mod tests {
             links: Selector::parse("a").unwrap(),
             paragraphs: Selector::parse("p").unwrap(),
             images: Selector::parse("img").unwrap(),
+            body_content_blocks: Selector::parse(
+                "body > article, body > main, body > section, body > div",
+            )
+            .unwrap(),
         }
     }
 

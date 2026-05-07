@@ -168,6 +168,25 @@ fn short_article_candidate_is_not_replaced_by_noisy_body_retry() {
 }
 
 #[test]
+fn short_article_candidate_is_not_replaced_by_paragraph_wrapped_noise() {
+    let noise = "sidebar noise ".repeat(200);
+    let html = format!(
+        r#"
+    <html><body>
+      <article><p>Focused article content stays selected even when surrounding layout contains noisy sidebar text for readers.</p></article>
+      <aside><p>{noise}</p></aside>
+      <footer><p>Footer text that should not be included.</p></footer>
+    </body></html>"#
+    );
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("Focused article content stays selected"));
+    assert!(!main.contains("sidebar noise"));
+    assert!(!main.contains("Footer text"));
+}
+
+#[test]
 fn skips_empty_candidates() {
     let html = r#"
     <html><body>
