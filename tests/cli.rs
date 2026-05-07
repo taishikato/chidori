@@ -66,6 +66,36 @@ async fn fetches_url_and_prints_markdown_to_stdout() {
 }
 
 #[tokio::test]
+async fn retries_short_entry_candidate_and_prints_recovered_body() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/retry"))
+        .respond_with(html_response(
+            r#"
+            <html><body>
+              <article><p>Stub.</p></article>
+              <div class="docs-page">
+                <h1>Recovered Docs</h1>
+                <p>This useful documentation section is recovered by the retry path.</p>
+                <p>It gives coding agents enough Markdown to work with.</p>
+                <p>The first article candidate was too short to be useful.</p>
+              </div>
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/retry", server.uri()))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Recovered Docs"))
+        .stdout(predicate::str::contains("coding agents enough Markdown"))
+        .stderr(predicate::str::is_empty());
+}
+
+#[tokio::test]
 async fn json_outputs_metadata_and_markdown() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

@@ -24,6 +24,8 @@ const PRIMARY_ENTRY_SELECTORS: &[&str] = &[
 ];
 
 const BODY_FALLBACK_SELECTORS: &[&str] = &["body"];
+const LOW_WORD_COUNT_RETRY_THRESHOLD: usize = 50;
+const RETRY_MIN_GAIN_MULTIPLIER: usize = 2;
 
 #[derive(Debug, Clone)]
 struct Candidate {
@@ -51,12 +53,28 @@ pub fn extract_main_html(doc: &ParsedDocument) -> Result<String, ChidoriError> {
         images: Selector::parse("img").map_err(|error| ChidoriError::Unknown(error.to_string()))?,
     };
 
-    let candidate = match best_candidate_for_selectors(doc, PRIMARY_ENTRY_SELECTORS, &selectors)? {
-        Some(candidate) => Some(candidate),
-        None => best_candidate_for_selectors(doc, BODY_FALLBACK_SELECTORS, &selectors)?,
-    };
+    let mut best_candidate =
+        best_candidate_for_selectors(doc, PRIMARY_ENTRY_SELECTORS, &selectors)?;
 
-    candidate
+    if best_candidate.is_none() {
+        best_candidate = best_candidate_for_selectors(doc, BODY_FALLBACK_SELECTORS, &selectors)?;
+    }
+
+    if let Some(candidate_word_count) = best_candidate
+        .as_ref()
+        .filter(|candidate| candidate.word_count < LOW_WORD_COUNT_RETRY_THRESHOLD)
+        .map(|candidate| candidate.word_count)
+    {
+        if let Some(body_candidate) =
+            best_candidate_for_selectors(doc, BODY_FALLBACK_SELECTORS, &selectors)?
+        {
+            if body_candidate.word_count > candidate_word_count * RETRY_MIN_GAIN_MULTIPLIER {
+                best_candidate = Some(body_candidate);
+            }
+        }
+    }
+
+    best_candidate
         .map(|candidate| candidate.html)
         .ok_or(ChidoriError::ExtractionFailed)
 }
