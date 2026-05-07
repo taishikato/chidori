@@ -61,7 +61,9 @@ fn extracts_article_over_navigation() {
 
 #[test]
 fn defuddle_priority_selectors_can_beat_larger_generic_main() {
-    let html = r#"
+    let focused_body = "Focused content wins through selector priority. ".repeat(10);
+    let html = format!(
+        r#"
     <html><body>
       <main>
         <p>This generic main wrapper has extra words that should not win just because it is larger.</p>
@@ -69,9 +71,10 @@ fn defuddle_priority_selectors_can_beat_larger_generic_main() {
       </main>
       <div class="post-content">
         <h1>Focused Post</h1>
-        <p>Focused content wins through selector priority.</p>
+        <p>{focused_body}</p>
       </div>
-    </body></html>"#;
+    </body></html>"#
+    );
     let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
 
     let main = extract_main_html(&doc).unwrap();
@@ -109,14 +112,17 @@ fn prefers_less_negative_score_candidate() {
 
 #[test]
 fn body_does_not_beat_article() {
-    let html = r#"
+    let focused_body = "Focused article content. ".repeat(18);
+    let html = format!(
+        r#"
     <html><body>
-      <article><p>Focused article content.</p></article>
+      <article><p>{focused_body}</p></article>
       <aside>
         Sidebar filler text with many many many many many many many many many many extra words.
       </aside>
       <footer>Unrelated footer text that should not be included in extracted output.</footer>
-    </body></html>"#;
+    </body></html>"#
+    );
     let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
     let main = extract_main_html(&doc).unwrap();
 
@@ -127,11 +133,12 @@ fn body_does_not_beat_article() {
 
 #[test]
 fn body_fallback_does_not_compete_with_primary_candidates() {
+    let focused_body = "Focused article content. ".repeat(18);
     let filler = "sidebar noise ".repeat(260);
     let html = format!(
         r#"
     <html><body>
-      <article><p>Focused article content.</p></article>
+      <article><p>{focused_body}</p></article>
       <aside>{filler}</aside>
       <footer>Footer text that should not be included.</footer>
     </body></html>"#
@@ -156,6 +163,27 @@ fn skips_empty_candidates() {
 
     assert!(main.contains("FallbackLink"));
     assert!(!main.contains("<article"));
+}
+
+#[test]
+fn retries_with_body_when_entry_candidate_is_too_short() {
+    let html = r#"
+    <html><body>
+      <article><p>Stub.</p></article>
+      <div class="docs-page">
+        <h1>Runtime Rendered Documentation</h1>
+        <p>This useful documentation section lives outside common article selectors.</p>
+        <p>The retry path should recover it when the first entry candidate is tiny.</p>
+        <p>Agents need this text because otherwise the fetched page is almost empty.</p>
+      </div>
+    </body></html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/docs").unwrap());
+
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("Runtime Rendered Documentation"));
+    assert!(main.contains("useful documentation section"));
+    assert!(main.contains("Agents need this text"));
 }
 
 #[test]
