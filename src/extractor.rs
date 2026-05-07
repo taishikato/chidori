@@ -208,11 +208,11 @@ mod tests {
     #[test]
     fn score_element_penalizes_link_text_density() {
         let link_score = score_first(
-            r#"<section><a href="/one">Alpha Beta Gamma Delta</a><a href="/two">Epsilon Zeta Eta Theta</a></section>"#,
+            r#"<section><a href="/one">Alpha beta gamma, delta epsilon zeta, eta theta.</a></section>"#,
             "section",
         );
         let prose_score = score_first(
-            r#"<section>This paragraph is plain article prose with commas, context, and useful detail.</section>"#,
+            r#"<section>Alpha beta gamma, delta epsilon zeta, eta theta.</section>"#,
             "section",
         );
 
