@@ -1,7 +1,7 @@
 use crate::{document::ParsedDocument, error::ChidoriError};
 use scraper::Selector;
 
-const ENTRY_SELECTORS: &[&str] = &[
+const PRIMARY_ENTRY_SELECTORS: &[&str] = &[
     "#post",
     ".post-content",
     ".post-body",
@@ -21,8 +21,9 @@ const ENTRY_SELECTORS: &[&str] = &[
     "[role=\"main\"]",
     ".article-body",
     "#content",
-    "body",
 ];
+
+const BODY_FALLBACK_SELECTORS: &[&str] = &["body"];
 
 #[derive(Debug, Clone)]
 struct Candidate {
@@ -32,15 +33,21 @@ struct Candidate {
     html: String,
 }
 
-fn selector_priority(selector_index: usize) -> isize {
-    ((ENTRY_SELECTORS.len() - selector_index) * 40) as isize
+fn selector_priority(selector_count: usize, selector_index: usize) -> isize {
+    ((selector_count - selector_index) * 40) as isize
 }
 
 pub fn extract_main_html(doc: &ParsedDocument) -> Result<String, ChidoriError> {
     let link_selector =
         Selector::parse("a").map_err(|error| ChidoriError::Unknown(error.to_string()))?;
 
-    best_candidate_for_selectors(doc, ENTRY_SELECTORS, &link_selector)?
+    let candidate =
+        match best_candidate_for_selectors(doc, PRIMARY_ENTRY_SELECTORS, &link_selector)? {
+            Some(candidate) => Some(candidate),
+            None => best_candidate_for_selectors(doc, BODY_FALLBACK_SELECTORS, &link_selector)?,
+        };
+
+    candidate
         .map(|candidate| candidate.html)
         .ok_or(ChidoriError::ExtractionFailed)
 }
@@ -62,8 +69,9 @@ fn best_candidate_for_selectors(
                 continue;
             }
             let link_count = element.select(link_selector).count();
-            let score =
-                selector_priority(selector_index) + word_count as isize - (link_count * 3) as isize;
+            let score = selector_priority(raw_selectors.len(), selector_index)
+                + word_count as isize
+                - (link_count * 3) as isize;
             let candidate = Candidate {
                 score,
                 selector_index,
