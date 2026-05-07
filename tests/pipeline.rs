@@ -60,6 +60,28 @@ fn extracts_article_over_navigation() {
 }
 
 #[test]
+fn defuddle_priority_selectors_can_beat_larger_generic_main() {
+    let html = r#"
+    <html><body>
+      <main>
+        <p>This generic main wrapper has extra words that should not win just because it is larger.</p>
+        <p>It also includes unrelated wrapper text around the actual post area.</p>
+      </main>
+      <div class="post-content">
+        <h1>Focused Post</h1>
+        <p>Focused content wins through selector priority.</p>
+      </div>
+    </body></html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("Focused Post"));
+    assert!(main.contains("Focused content wins"));
+    assert!(!main.contains("generic main wrapper"));
+}
+
+#[test]
 fn extracts_zero_score_candidate() {
     let html = r#"
     <html><body>
@@ -75,8 +97,8 @@ fn extracts_zero_score_candidate() {
 fn prefers_less_negative_score_candidate() {
     let html = r#"
     <html><body>
-      <article><a href="/x">OnlyLink</a></article>
       <main><a href="/y">BetterLink</a> extra</main>
+      <main><a href="/x">OnlyLink</a></main>
     </body></html>"#;
     let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
     let main = extract_main_html(&doc).unwrap();
