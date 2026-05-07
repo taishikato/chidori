@@ -112,17 +112,14 @@ fn prefers_less_negative_score_candidate() {
 
 #[test]
 fn body_does_not_beat_article() {
-    let focused_body = "Focused article content. ".repeat(18);
-    let html = format!(
-        r#"
+    let html = r#"
     <html><body>
-      <article><p>{focused_body}</p></article>
+      <article><p>Focused article content stays selected even when surrounding layout contains noisy sidebar text for readers.</p></article>
       <aside>
         Sidebar filler text with many many many many many many many many many many extra words.
       </aside>
       <footer>Unrelated footer text that should not be included in extracted output.</footer>
-    </body></html>"#
-    );
+    </body></html>"#;
     let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
     let main = extract_main_html(&doc).unwrap();
 
@@ -147,6 +144,25 @@ fn body_fallback_does_not_compete_with_primary_candidates() {
     let main = extract_main_html(&doc).unwrap();
 
     assert!(main.contains("Focused article content"));
+    assert!(!main.contains("sidebar noise"));
+    assert!(!main.contains("Footer text"));
+}
+
+#[test]
+fn short_article_candidate_is_not_replaced_by_noisy_body_retry() {
+    let noise = "sidebar noise ".repeat(200);
+    let html = format!(
+        r#"
+    <html><body>
+      <article><p>Focused article content stays selected even when surrounding layout contains noisy sidebar text for readers.</p></article>
+      <aside>{noise}</aside>
+      <footer>Footer text that should not be included.</footer>
+    </body></html>"#
+    );
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("Focused article content stays selected"));
     assert!(!main.contains("sidebar noise"));
     assert!(!main.contains("Footer text"));
 }
