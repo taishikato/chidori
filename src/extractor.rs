@@ -14,6 +14,10 @@ const PRIMARY_ENTRY_SELECTORS: &[&str] = &[
     ".content-article",
     ".instapaper_body",
     ".post",
+    ".js-discussion",
+    ".pull-discussion-timeline",
+    "#article-block",
+    "#section-content",
     ".markdown-body",
     "article",
     "[role=\"article\"]",
@@ -21,6 +25,8 @@ const PRIMARY_ENTRY_SELECTORS: &[&str] = &[
     "[role=\"main\"]",
     ".article-body",
     "#content",
+    ".article",
+    ".content-paragraph",
 ];
 
 const BODY_FALLBACK_SELECTORS: &[&str] = &["body"];

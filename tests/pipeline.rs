@@ -149,6 +149,29 @@ fn body_fallback_does_not_compete_with_primary_candidates() {
 }
 
 #[test]
+fn generic_content_paragraph_does_not_beat_larger_main_container() {
+    let first_section = "Opening paragraph with useful context. ".repeat(18);
+    let second_section = "Second section with details that must stay with the article. ".repeat(18);
+    let html = format!(
+        r#"
+    <html><body>
+      <main>
+        <h1>Complete Article</h1>
+        <div class="content-paragraph"><p>{first_section}</p></div>
+        <p>{second_section}</p>
+      </main>
+    </body></html>"#
+    );
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("Complete Article"));
+    assert!(main.contains("Opening paragraph with useful context"));
+    assert!(main.contains("Second section with details"));
+}
+
+#[test]
 fn short_article_candidate_is_not_replaced_by_noisy_body_retry() {
     let noise = "sidebar noise ".repeat(200);
     let html = format!(
@@ -335,6 +358,33 @@ fn converts_html_to_agent_friendly_markdown() {
     assert!(markdown.contains("**world**"));
     assert!(markdown.contains("```"));
     assert!(markdown.contains("fn main() {}"));
+}
+
+#[test]
+fn keeps_code_fence_languages_aligned_with_their_code_blocks() {
+    let html = r#"
+    <article>
+      <pre><code>plain text</code></pre>
+      <pre><code class="language-rust">fn main() {}</code></pre>
+    </article>"#;
+
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("```\nplain text\n```"));
+    assert!(markdown.contains("```rust\nfn main() {}\n```"));
+    assert!(!markdown.contains("```rust\nplain text"));
+}
+
+#[test]
+fn preserves_code_fence_language_when_attribute_has_spaces() {
+    let html = r#"
+    <article>
+      <pre><code class = "language-rust">fn main() {}</code></pre>
+    </article>"#;
+
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("```rust\nfn main() {}\n```"));
 }
 
 #[test]
