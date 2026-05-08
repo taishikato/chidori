@@ -68,7 +68,21 @@ fn remove_fragment_only_link_lists(html: &str) -> String {
             return false;
         }
 
-        true
+        let text = dom.root_element().text().collect::<Vec<_>>().join(" ");
+        let text_len = text.split_whitespace().collect::<String>().len();
+        let link_text_len: usize = links
+            .iter()
+            .map(|link| {
+                link.text()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .split_whitespace()
+                    .collect::<String>()
+                    .len()
+            })
+            .sum();
+
+        text_len > 0 && (link_text_len as f64 / text_len as f64) > 0.85
     })
 }
 
@@ -101,17 +115,12 @@ fn remove_link_dense_related_sections(html: &str) -> String {
 }
 
 fn is_hidden_opening_tag(opening_tag: &str) -> bool {
-    let normalized = opening_tag.to_ascii_lowercase();
-    normalized.contains(" hidden")
-        || normalized.contains(" aria-hidden=\"true\"")
-        || normalized.contains(" aria-hidden='true'")
-        || normalized.contains("display: none")
-        || normalized.contains("display:none")
-        || normalized.contains("visibility: hidden")
-        || normalized.contains("visibility:hidden")
-        || normalized.contains("class=\"hidden")
-        || normalized.contains("class='hidden")
-        || normalized.contains(" sr-only")
+    has_attribute(opening_tag, "hidden")
+        || attribute_value_eq(opening_tag, "aria-hidden", "true")
+        || attribute_value_contains_normalized(opening_tag, "style", "display:none")
+        || attribute_value_contains_normalized(opening_tag, "style", "visibility:hidden")
+        || has_class_token(opening_tag, "hidden")
+        || has_class_token(opening_tag, "sr-only")
 }
 
 fn unwrap_javascript_links(html: &str) -> String {
@@ -124,26 +133,118 @@ fn unwrap_javascript_links(html: &str) -> String {
 }
 
 fn has_class_token(opening_tag: &str, expected: &str) -> bool {
-    for quote in ['"', '\''] {
-        let pattern = format!("class={quote}");
-        let mut rest = opening_tag;
-        while let Some(start) = rest.find(&pattern) {
-            let value_start = start + pattern.len();
-            let value = &rest[value_start..];
-            if let Some(end) = value.find(quote) {
-                if value[..end]
-                    .split_ascii_whitespace()
-                    .any(|token| token == expected)
-                {
-                    return true;
-                }
-                rest = &value[end + 1..];
-            } else {
-                break;
-            }
-        }
+    attribute_values(opening_tag, "class").any(|value| {
+        value
+            .split_ascii_whitespace()
+            .any(|token| token.eq_ignore_ascii_case(expected))
+    })
+}
+
+fn has_attribute(opening_tag: &str, expected: &str) -> bool {
+    opening_attributes(opening_tag).any(|(name, _)| name.eq_ignore_ascii_case(expected))
+}
+
+fn attribute_value_eq(opening_tag: &str, expected: &str, expected_value: &str) -> bool {
+    attribute_values(opening_tag, expected)
+        .any(|value| value.trim().eq_ignore_ascii_case(expected_value))
+}
+
+fn attribute_value_contains_normalized(
+    opening_tag: &str,
+    expected: &str,
+    expected_value: &str,
+) -> bool {
+    attribute_values(opening_tag, expected).any(|value| {
+        value
+            .chars()
+            .filter(|ch| !ch.is_ascii_whitespace())
+            .collect::<String>()
+            .to_ascii_lowercase()
+            .contains(expected_value)
+    })
+}
+
+fn attribute_values<'a>(
+    opening_tag: &'a str,
+    expected: &'a str,
+) -> impl Iterator<Item = &'a str> + 'a {
+    opening_attributes(opening_tag).filter_map(move |(name, value)| {
+        name.eq_ignore_ascii_case(expected)
+            .then_some(value)
+            .flatten()
+    })
+}
+
+fn opening_attributes(opening_tag: &str) -> OpeningAttributes<'_> {
+    let input = opening_tag
+        .strip_prefix('<')
+        .and_then(|value| value.strip_suffix('>'))
+        .unwrap_or(opening_tag);
+    let input = input.trim_start().trim_end_matches('/').trim_end();
+    let name_end = input
+        .find(|ch: char| ch.is_ascii_whitespace() || ch == '/')
+        .unwrap_or(input.len());
+
+    OpeningAttributes {
+        input: &input[name_end..],
     }
-    false
+}
+
+struct OpeningAttributes<'a> {
+    input: &'a str,
+}
+
+impl<'a> Iterator for OpeningAttributes<'a> {
+    type Item = (&'a str, Option<&'a str>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.input = self.input.trim_start();
+        if self.input.is_empty() || self.input.starts_with('/') {
+            return None;
+        }
+
+        let name_end = self
+            .input
+            .find(|ch: char| ch.is_ascii_whitespace() || ch == '=' || ch == '/')
+            .unwrap_or(self.input.len());
+        if name_end == 0 {
+            self.input = &self.input[1..];
+            return self.next();
+        }
+
+        let name = &self.input[..name_end];
+        let mut rest = self.input[name_end..].trim_start();
+        if !rest.starts_with('=') {
+            self.input = rest;
+            return Some((name, None));
+        }
+
+        rest = rest[1..].trim_start();
+        if rest.is_empty() {
+            self.input = rest;
+            return Some((name, Some("")));
+        }
+
+        if let Some(quote) = rest
+            .chars()
+            .next()
+            .filter(|quote| matches!(quote, '"' | '\''))
+        {
+            let value = &rest[quote.len_utf8()..];
+            if let Some(end) = value.find(quote) {
+                self.input = &value[end + quote.len_utf8()..];
+                return Some((name, Some(&value[..end])));
+            }
+            self.input = "";
+            return Some((name, Some(value)));
+        }
+
+        let value_end = rest
+            .find(|ch: char| ch.is_ascii_whitespace() || ch == '/')
+            .unwrap_or(rest.len());
+        self.input = &rest[value_end..];
+        Some((name, Some(&rest[..value_end])))
+    }
 }
 
 fn tail_has_meaningful_text(html: &str) -> bool {

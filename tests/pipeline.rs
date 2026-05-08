@@ -638,6 +638,22 @@ fn removes_hidden_and_embedded_noise_elements() {
 }
 
 #[test]
+fn hidden_cleanup_does_not_match_attribute_text() {
+    let html = r#"
+    <article>
+      <section aria-label="The hidden costs of parser shortcuts">
+        <p>Visible section with wording that should not trigger hidden cleanup.</p>
+      </section>
+      <p data-note="a hidden gem">Visible paragraph with attribute prose.</p>
+    </article>"#;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+
+    assert!(cleaned.contains("Visible section with wording"));
+    assert!(cleaned.contains("Visible paragraph with attribute prose."));
+}
+
+#[test]
 fn removes_breadcrumb_blocks_without_semantic_nav_tags() {
     let html = r#"
     <main>
@@ -695,6 +711,27 @@ fn keeps_short_fragment_link_lists_that_are_not_table_of_contents() {
     assert!(cleaned.contains("API compatibility note"));
     assert!(cleaned.contains("Migration footnote"));
     assert!(cleaned.contains("Keep the API section."));
+}
+
+#[test]
+fn keeps_descriptive_fragment_link_lists_that_are_not_table_of_contents() {
+    let html = r##"
+    <article>
+      <h1>Parser Concepts</h1>
+      <ul>
+        <li><a href="#tokens">Tokens</a>: the smallest pieces emitted by the tokenizer.</li>
+        <li><a href="#tree">Tree construction</a>: how nested HTML nodes are assembled.</li>
+        <li><a href="#cleanup">Cleanup</a>: post-processing that removes boilerplate.</li>
+      </ul>
+      <h2 id="tokens">Tokens</h2>
+      <p>The tokenizer detail remains part of the article.</p>
+    </article>"##;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+
+    assert!(cleaned.contains("the smallest pieces emitted"));
+    assert!(cleaned.contains("how nested HTML nodes are assembled"));
+    assert!(cleaned.contains("post-processing that removes boilerplate"));
 }
 
 #[test]
