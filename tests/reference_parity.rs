@@ -189,6 +189,33 @@ fn matches_reference_pages_for_representative_urls() {
                 "Reddit app download",
             ],
         },
+        Case {
+            fixture: "domain--federated-status-thread.html",
+            url: "https://mastodon.social/@alice/112233445566778899",
+            expected: &[
+                "Alice Example",
+                "@alice@mastodon.social",
+                "May 8, 2026, 3:04 PM",
+                "Shipping a tiny parser improvement today.",
+                "[release notes](https://example.com/release-notes)",
+                "> Bob Builder",
+                "> @bob@example.net",
+                "> May 8, 2026, 3:20 PM",
+                "> This makes saved social threads much easier to read from the CLI.",
+            ],
+            rejected: &[
+                "Explore",
+                "Log in",
+                "Sign up",
+                "Download the official app",
+                "New to Mastodon?",
+                "Promoted suggestion",
+                "Mobile apps",
+                "Reply",
+                "Boost",
+                "Favourite",
+            ],
+        },
     ];
 
     for case in cases {
@@ -215,6 +242,29 @@ fn reddit_reference_reply_is_nested_once() {
     );
     assert_occurs_once(&markdown, "u/borrowedbits");
     assert_occurs_once(&markdown, "That phrasing helped me too");
+}
+
+#[test]
+fn federated_status_reply_is_nested_once() {
+    let markdown = fixture_to_markdown(
+        "domain--federated-status-thread.html",
+        "https://mastodon.social/@alice/112233445566778899",
+    );
+
+    assert_contains_all(
+        &markdown,
+        &[
+            "> Bob Builder",
+            "> @bob@example.net",
+            "> May 8, 2026, 3:20 PM",
+            "> This makes saved social threads much easier to read from the CLI.",
+        ],
+    );
+    assert_occurs_once(&markdown, "Bob Builder");
+    assert_occurs_once(
+        &markdown,
+        "This makes saved social threads much easier to read from the CLI.",
+    );
 }
 
 #[test]

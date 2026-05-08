@@ -59,11 +59,23 @@ struct RedditSelectors {
     times: Selector,
 }
 
+struct MastodonSelectors {
+    statuses: Selector,
+    display_names: Selector,
+    handles: Selector,
+    times: Selector,
+    bodies: Selector,
+}
+
 fn selector_priority(selector_count: usize, selector_index: usize) -> isize {
     ((selector_count - selector_index) * 40) as isize
 }
 
 pub fn extract_main_html(doc: &ParsedDocument) -> Result<String, ChidoriError> {
+    if let Some(html) = mastodon_status_thread_candidate(doc)? {
+        return Ok(html);
+    }
+
     if let Some(html) = hacker_news_listing_candidate(doc)? {
         return Ok(html);
     }
@@ -126,6 +138,127 @@ pub fn extract_main_html(doc: &ParsedDocument) -> Result<String, ChidoriError> {
     } else {
         Err(ChidoriError::ExtractionFailed)
     }
+}
+
+fn mastodon_status_thread_candidate(doc: &ParsedDocument) -> Result<Option<String>, ChidoriError> {
+    if !is_mastodon_status_path(doc) {
+        return Ok(None);
+    }
+
+    let selectors = MastodonSelectors {
+        statuses: Selector::parse("article.status, article.status-public, article[data-id]")
+            .map_err(|error| ChidoriError::Unknown(error.to_string()))?,
+        display_names: Selector::parse(
+            ".display-name__html, .status__display-name strong, .p-name",
+        )
+        .map_err(|error| ChidoriError::Unknown(error.to_string()))?,
+        handles: Selector::parse(".display-name__account, .status__display-name span")
+            .map_err(|error| ChidoriError::Unknown(error.to_string()))?,
+        times: Selector::parse("time").map_err(|error| ChidoriError::Unknown(error.to_string()))?,
+        bodies: Selector::parse(".status__content, .e-content")
+            .map_err(|error| ChidoriError::Unknown(error.to_string()))?,
+    };
+
+    let statuses: Vec<_> = doc.dom.select(&selectors.statuses).collect();
+    if statuses.is_empty() {
+        return Ok(None);
+    }
+
+    let mut output = String::from("<article class=\"chidori-mastodon-thread\">");
+    let mut status_count = 0;
+    for status in statuses {
+        if push_mastodon_status(&mut output, status, &selectors, status_count > 0) {
+            status_count += 1;
+        }
+    }
+    output.push_str("</article>");
+
+    if status_count == 0 {
+        Ok(None)
+    } else {
+        Ok(Some(output))
+    }
+}
+
+fn is_mastodon_status_path(doc: &ParsedDocument) -> bool {
+    let Some(host) = doc.url.host_str() else {
+        return false;
+    };
+
+    (host == "mastodon.social" || host.ends_with(".mastodon.social"))
+        && doc.url.path_segments().is_some_and(|segments| {
+            let segments: Vec<_> = segments.collect();
+            segments.len() >= 2
+                && segments[0].starts_with('@')
+                && segments[1]
+                    .chars()
+                    .all(|character| character.is_ascii_digit())
+        })
+}
+
+fn push_mastodon_status(
+    output: &mut String,
+    status: ElementRef<'_>,
+    selectors: &MastodonSelectors,
+    nested: bool,
+) -> bool {
+    let Some(body) = status
+        .select(&selectors.bodies)
+        .next()
+        .filter(|body| !element_text(*body).is_empty())
+    else {
+        return false;
+    };
+
+    if nested {
+        output.push_str("<blockquote>");
+    } else {
+        output.push_str("<section class=\"chidori-mastodon-status\">");
+    }
+
+    if let Some(display_name) = status
+        .select(&selectors.display_names)
+        .next()
+        .map(element_text)
+        .filter(|display_name| !display_name.is_empty())
+    {
+        output.push_str("<p>");
+        output.push_str(&encode_text(&display_name));
+        output.push_str("</p>");
+    }
+
+    if let Some(handle) = status
+        .select(&selectors.handles)
+        .next()
+        .map(element_text)
+        .filter(|handle| !handle.is_empty())
+    {
+        push_small_paragraph(output, &handle);
+    }
+    if let Some(date) = status
+        .select(&selectors.times)
+        .next()
+        .map(element_text)
+        .filter(|date| !date.is_empty())
+    {
+        push_small_paragraph(output, &date);
+    }
+
+    output.push_str(&body.inner_html());
+
+    if nested {
+        output.push_str("</blockquote>");
+    } else {
+        output.push_str("</section>");
+    }
+
+    true
+}
+
+fn push_small_paragraph(output: &mut String, text: &str) {
+    output.push_str("<p><small>");
+    output.push_str(&encode_text(text));
+    output.push_str("</small></p>");
 }
 
 fn reddit_discussion_candidate(doc: &ParsedDocument) -> Result<Option<String>, ChidoriError> {
