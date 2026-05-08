@@ -142,6 +142,7 @@ fn smallest_element_containing_text(
     Ok(doc
         .dom
         .select(&selector)
+        .filter(|element| !matches!(element.value().name(), "script" | "style" | "noscript"))
         .filter_map(|element| {
             let text = element.text().collect::<Vec<_>>().join(" ");
             let normalized = normalize_text(&text);
@@ -192,7 +193,7 @@ fn score_element(
     element: ElementRef<'_>,
     selectors: &ScoringSelectors,
 ) -> (isize, usize, usize, usize) {
-    let text = element.text().collect::<Vec<_>>().join(" ");
+    let text = text_without_invisible_nodes(&element.html());
     let word_count = text.split_whitespace().count();
     let paragraph_count = element.select(&selectors.paragraphs).count();
     let content_block_count = element.select(&selectors.body_content_blocks).count();
@@ -248,6 +249,17 @@ fn score_element(
     score = ((score as f64) * (1.0 - link_density)).round() as isize;
 
     (score, word_count, paragraph_count, content_block_count)
+}
+
+fn text_without_invisible_nodes(html: &str) -> String {
+    let cleaned =
+        crate::cleaner::clean_html(html, &crate::cleaner::CleanOptions { no_images: false });
+
+    scraper::Html::parse_fragment(&cleaned)
+        .root_element()
+        .text()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn best_candidate_for_selectors(

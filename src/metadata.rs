@@ -50,6 +50,8 @@ pub fn extract_metadata(doc: &ParsedDocument) -> Metadata {
         author: meta(doc, "name", "author")
             .or_else(|| meta(doc, "property", "article:author"))
             .or_else(|| schema_string(&schema_org_data, &["author.name", "creator.name"]))
+            .or_else(|| schema_article_string(&schema_org_data, "author"))
+            .or_else(|| schema_article_string(&schema_org_data, "creator"))
             .unwrap_or_default(),
         published: meta(doc, "property", "article:published_time")
             .or_else(|| meta(doc, "name", "date"))

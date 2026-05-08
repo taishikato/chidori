@@ -80,6 +80,28 @@ fn extracts_extended_metadata_from_social_and_structured_sources() {
 }
 
 #[test]
+fn extracts_author_from_scalar_structured_source() {
+    let html = r#"<!doctype html>
+    <html lang="en">
+      <head>
+        <title>Scalar Author</title>
+        <script type="application/ld+json">
+          {
+            "@context": "https://schema.org",
+            "@type": "Article",
+            "author": "Grace Hopper"
+          }
+        </script>
+      </head>
+      <body><article><p>Hello world.</p></article></body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.author, "Grace Hopper");
+}
+
+#[test]
 fn extracts_site_name_from_website_schema_node() {
     let html = r#"<!doctype html>
     <html lang="en">
@@ -458,6 +480,29 @@ fn uses_structured_body_when_visible_body_has_no_words() {
     let main = extract_main_html(&doc).unwrap();
 
     assert!(main.contains("Only structured article text is available here"));
+}
+
+#[test]
+fn falls_back_to_plain_structured_body_when_body_only_contains_schema_script() {
+    let html = r#"
+    <html>
+      <head></head>
+      <body>
+        <script type="application/ld+json">
+          {
+            "@context": "https://schema.org",
+            "@type": "Article",
+            "articleBody": "Only structured article text is available here, but the schema script should not be selected as visible content."
+          }
+        </script>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("Only structured article text is available here"));
+    assert!(!main.contains("<script"));
 }
 
 #[test]
