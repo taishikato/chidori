@@ -74,8 +74,10 @@ pub fn extract_main_html(doc: &ParsedDocument) -> Result<String, ChidoriError> {
         best_candidate = best_candidate_for_selectors(doc, BODY_FALLBACK_SELECTORS, &selectors)?;
     }
 
+    let mut used_structured_content = false;
     if let Some(candidate) = best_candidate.as_ref() {
         if let Some(html) = structured_content_candidate(doc, candidate.word_count)? {
+            used_structured_content = true;
             best_candidate = Some(Candidate {
                 score: candidate.score,
                 selector_index: candidate.selector_index,
@@ -86,15 +88,17 @@ pub fn extract_main_html(doc: &ParsedDocument) -> Result<String, ChidoriError> {
         }
     }
 
-    if let Some(candidate) = best_candidate
-        .as_ref()
-        .filter(|candidate| candidate.word_count < LOW_WORD_COUNT_RETRY_THRESHOLD)
-    {
-        if let Some(body_candidate) =
-            best_candidate_for_selectors(doc, BODY_FALLBACK_SELECTORS, &selectors)?
+    if !used_structured_content {
+        if let Some(candidate) = best_candidate
+            .as_ref()
+            .filter(|candidate| candidate.word_count < LOW_WORD_COUNT_RETRY_THRESHOLD)
         {
-            if should_retry_with_body(candidate, &body_candidate) {
-                best_candidate = Some(body_candidate);
+            if let Some(body_candidate) =
+                best_candidate_for_selectors(doc, BODY_FALLBACK_SELECTORS, &selectors)?
+            {
+                if should_retry_with_body(candidate, &body_candidate) {
+                    best_candidate = Some(body_candidate);
+                }
             }
         }
     }

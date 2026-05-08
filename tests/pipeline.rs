@@ -407,6 +407,38 @@ fn uses_structured_body_when_it_is_more_complete_than_visible_shell() {
 }
 
 #[test]
+fn structured_body_is_not_replaced_by_noisy_body_retry() {
+    let structured_text = "Structured article text has enough complete details for agents and should remain selected.";
+    let noise = "navigation sidebar footer noise ".repeat(120);
+    let html = format!(
+        r#"
+    <html>
+      <head>
+        <script type="application/ld+json">
+          {{
+            "@context": "https://schema.org",
+            "@type": "Article",
+            "articleBody": "{structured_text}"
+          }}
+        </script>
+      </head>
+      <body>
+        <article><p>Short shell.</p></article>
+        <section><p>{structured_text}</p></section>
+        <aside>{noise}</aside>
+      </body>
+    </html>"#
+    );
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("Structured article text"));
+    assert!(!main.contains("navigation sidebar footer noise"));
+    assert!(!main.contains("Short shell"));
+}
+
+#[test]
 fn uses_structured_body_when_visible_body_has_no_words() {
     let html = r#"
     <html>
