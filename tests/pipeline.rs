@@ -429,6 +429,38 @@ fn uses_structured_body_when_visible_body_has_no_words() {
 }
 
 #[test]
+fn ignores_non_article_schema_text_for_structured_body_fallback() {
+    let html = r#"
+    <html>
+      <head>
+        <script type="application/ld+json">
+          {
+            "@context": "https://schema.org",
+            "@type": "FAQPage",
+            "mainEntity": [
+              {
+                "@type": "Question",
+                "name": "What is included?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "This FAQ answer is long enough to beat the short visible article shell, but it is not the article body and should not replace the visible content."
+                }
+              }
+            ]
+          }
+        </script>
+      </head>
+      <body><article><p>Short visible article shell.</p></article></body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("Short visible article shell"));
+    assert!(!main.contains("This FAQ answer is long enough"));
+}
+
+#[test]
 fn removes_noise_and_optionally_images() {
     let html = r#"
     <article>

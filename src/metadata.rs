@@ -64,7 +64,9 @@ pub fn extract_metadata(doc: &ParsedDocument) -> Metadata {
 
 pub fn structured_content_text(doc: &ParsedDocument) -> Option<String> {
     let schema = extract_schema_org_data(doc);
-    schema_string(&schema, &["articleBody", "text"]).filter(|text| !text.trim().is_empty())
+    schema_string(&schema, &["articleBody"])
+        .or_else(|| schema_article_string(&schema, "text"))
+        .filter(|text| !text.trim().is_empty())
 }
 
 pub fn extract_schema_org_data(doc: &ParsedDocument) -> Option<Value> {
