@@ -29,7 +29,8 @@ pub fn extract_metadata(doc: &ParsedDocument) -> Metadata {
         domain: doc.url.host_str().unwrap_or_default().to_string(),
         title: meta(doc, "property", "og:title")
             .or_else(|| meta(doc, "name", "twitter:title"))
-            .or_else(|| schema_string(&schema_org_data, &["headline", "name"]))
+            .or_else(|| schema_string(&schema_org_data, &["headline"]))
+            .or_else(|| schema_article_string(&schema_org_data, "name"))
             .or_else(|| title(doc))
             .unwrap_or_default(),
         description: meta(doc, "name", "description")
@@ -148,6 +149,12 @@ fn schema_type_string(schema: &Option<Value>, schema_type: &str, property: &str)
             _ => None,
         })
         .find(|value| !value.trim().is_empty())
+}
+
+fn schema_article_string(schema: &Option<Value>, property: &str) -> Option<String> {
+    ["Article", "NewsArticle", "BlogPosting"]
+        .iter()
+        .find_map(|schema_type| schema_type_string(schema, schema_type, property))
 }
 
 fn find_typed_nodes<'a>(value: &'a Value, schema_type: &str) -> Vec<&'a Value> {

@@ -104,6 +104,55 @@ fn extracts_site_name_from_website_schema_node() {
 }
 
 #[test]
+fn does_not_use_website_schema_name_as_article_title() {
+    let html = r#"<!doctype html>
+    <html lang="en">
+      <head>
+        <title>HTML Article Title</title>
+        <script type="application/ld+json">
+          {
+            "@context": "https://schema.org",
+            "@graph": [
+              { "@type": "WebSite", "name": "Example Journal" },
+              { "@type": "Organization", "name": "Example Org" },
+              { "@type": "Article", "name": "Schema Article Title" }
+            ]
+          }
+        </script>
+      </head>
+      <body><article><p>Hello world.</p></article></body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.title, "Schema Article Title");
+}
+
+#[test]
+fn falls_back_to_html_title_when_schema_has_only_site_names() {
+    let html = r#"<!doctype html>
+    <html lang="en">
+      <head>
+        <title>HTML Article Title</title>
+        <script type="application/ld+json">
+          {
+            "@context": "https://schema.org",
+            "@graph": [
+              { "@type": "WebSite", "name": "Example Journal" },
+              { "@type": "Organization", "name": "Example Org" }
+            ]
+          }
+        </script>
+      </head>
+      <body><article><p>Hello world.</p></article></body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.title, "HTML Article Title");
+}
+
+#[test]
 fn extracts_article_over_navigation() {
     let html = r#"
     <html><body>
