@@ -1,4 +1,5 @@
 use assert_cmd::Command;
+use chidori::fetcher::{BOT_USER_AGENT, DEFAULT_USER_AGENT};
 use predicates::prelude::*;
 use serde_json::Value;
 use std::time::Duration;
@@ -163,6 +164,117 @@ This body is already **Markdown** and should stay that way.
         ))
         .stdout(predicate::str::contains("    cargo test --all"))
         .stderr(predicate::str::is_empty());
+}
+
+#[tokio::test]
+async fn retries_with_bot_user_agent_when_initial_page_has_no_extractable_content() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/bot-markdown"))
+        .and(header("user-agent", DEFAULT_USER_AGENT))
+        .respond_with(html_response(
+            r#"<html><head><title>Bot Markdown</title></head><body><div id="app"></div><script>hydrate()</script></body></html>"#,
+        ))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/bot-markdown"))
+        .and(header("user-agent", BOT_USER_AGENT))
+        .respond_with(html_response(
+            r#"
+            <html><head><title>Bot Markdown</title></head><body>
+# Bot Markdown
+
+This bot-rendered body keeps **Markdown** syntax intact.
+
+- recovered item
+- [recovered link](https://example.com/recovered)
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/bot-markdown", server.uri()))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "This bot-rendered body keeps **Markdown** syntax intact.",
+        ))
+        .stdout(predicate::str::contains(
+            "- [recovered link](https://example.com/recovered)",
+        ))
+        .stderr(predicate::str::is_empty());
+}
+
+#[tokio::test]
+async fn does_not_retry_with_bot_user_agent_when_initial_page_is_extractable() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/normal"))
+        .and(header("user-agent", DEFAULT_USER_AGENT))
+        .respond_with(html_response(
+            r#"<html><body><article><h1>Normal Article</h1><p>Initial content is enough.</p></article></body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/normal"))
+        .and(header("user-agent", BOT_USER_AGENT))
+        .respond_with(html_response(
+            r#"<html><body># Bot content that should not be requested</body></html>"#,
+        ))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/normal", server.uri()))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Normal Article"))
+        .stdout(predicate::str::contains("Bot content").not())
+        .stderr(predicate::str::is_empty());
+}
+
+#[tokio::test]
+async fn custom_user_agent_disables_automatic_bot_retry() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/custom-ua"))
+        .and(header("user-agent", "ChidoriTest/2.0"))
+        .respond_with(html_response(
+            r#"<html><head><title>Custom UA</title></head><body><div id="app"></div><script>hydrate()</script></body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/custom-ua"))
+        .and(header("user-agent", BOT_USER_AGENT))
+        .respond_with(html_response(
+            r#"<html><body># Bot content that should not be requested</body></html>"#,
+        ))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/custom-ua", server.uri()))
+        .arg("--user-agent")
+        .arg("ChidoriTest/2.0")
+        .assert()
+        .failure()
+        .code(7)
+        .stderr(predicate::str::contains("no content could be extracted"));
 }
 
 #[tokio::test]
