@@ -601,6 +601,7 @@ fn unwraps_javascript_links_without_losing_inner_content() {
     let html = r#"
     <article>
       <p>This has a <a href="javascript:void(0)">simple js link</a> in a sentence.</p>
+      <p>A spaced <a href = ' javascript:void(0) '>js link</a> should also unwrap.</p>
       <p>A <a href="javascript:void(0)"><strong>bold js link</strong></a> should keep formatting.</p>
       <p>Normal <a href="https://example.com">links</a> should stay linked.</p>
     </article>"#;
@@ -609,6 +610,7 @@ fn unwraps_javascript_links_without_losing_inner_content() {
     let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
 
     assert!(markdown.contains("This has a simple js link in a sentence."));
+    assert!(markdown.contains("A spaced js link should also unwrap."));
     assert!(markdown.contains("A **bold js link** should keep formatting."));
     assert!(markdown.contains("[links](https://example.com)"));
     assert!(!markdown.contains("javascript:"));

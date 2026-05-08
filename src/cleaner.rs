@@ -125,10 +125,11 @@ fn is_hidden_opening_tag(opening_tag: &str) -> bool {
 
 fn unwrap_javascript_links(html: &str) -> String {
     unwrap_matching_tags_where(html, "a", |opening_tag| {
-        let normalized = opening_tag.to_ascii_lowercase();
-        normalized.contains("href=\"javascript:")
-            || normalized.contains("href='javascript:")
-            || normalized.contains("href=javascript:")
+        attribute_values(opening_tag, "href").any(|href| {
+            href.trim_start()
+                .to_ascii_lowercase()
+                .starts_with("javascript:")
+        })
     })
 }
 
