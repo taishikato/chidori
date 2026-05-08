@@ -218,6 +218,29 @@ fn matches_reference_pages_for_representative_urls() {
                 "Favourite",
             ],
         },
+        Case {
+            fixture: "domain--video-watch-page.html",
+            url: "https://www.youtube.com/watch?v=abc123xyz",
+            expected: &[
+                "# Building a Parser Garden",
+                "Example Channel",
+                "May 8, 2026",
+                "This walkthrough shows how small extraction fixtures make CLI output predictable.",
+                "[project notes](https://example.com/project-notes)",
+                "Transcript",
+                "First we save a representative watch page.",
+                "Then we preserve readable captions without the surrounding page controls.",
+            ],
+            rejected: &[
+                "Home",
+                "Sign in",
+                "Subscribe",
+                "Share",
+                "Download app",
+                "Promoted video",
+                "Related video",
+            ],
+        },
     ];
 
     for case in cases {
