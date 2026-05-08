@@ -1,8 +1,9 @@
 # Extraction Capability Matrix
 
 This matrix maps relevant behavior from the local reference project to current
-`chidori` behavior. The curated corpus in `tools/parity-corpus.json` provides
-the executable evidence for implemented rows.
+`chidori` behavior. The curated corpus in `tools/parity-corpus.json` plus
+focused pipeline and CLI tests provide the executable evidence for implemented
+rows.
 
 | Area | Reference behavior reviewed | Chidori status | Evidence or rationale |
 | --- | --- | --- | --- |
@@ -22,8 +23,9 @@ the executable evidence for implemented rows.
 | Parameterized JSON-LD script types | Accepts JSON-LD content types with charset parameters. | Implemented | `extracts_schema_org_data_from_parameterized_json_ld_type`. |
 | Markdown output normalization | Normalizes setext headings and trims unstable whitespace while preserving code blocks. | Implemented | Markdown pipeline tests. |
 | URL fetching: redirects, charset, compression, timeout, user agent, language | Uses reqwest with charset, gzip, brotli, deflate, rustls TLS, timeout, UA, and Accept-Language support. | Implemented | `src/fetcher.rs`; `tests/fetcher.rs`; CLI tests. |
-| Raw Markdown extraction from bot-only pages | Reference can retry some URLs with a bot UA and extract embedded raw Markdown. | Deferred | Live network behavior is not part of deterministic curated corpus yet. Closest current behavior is configurable `--user-agent` and `--lang`. Add a fixture when a saved raw-Markdown page is admitted. |
-| Domain-specific social/comment extractors | Reference includes specialized extractors for Reddit, Hacker News, X/Twitter, Mastodon, YouTube, and others. | Deferred | Current milestone prioritizes generic web article extraction and GitHub discussion preservation. Add individual deterministic fixtures before implementing each specialized extractor. |
-| Math, callout, and footnote specialization | Reference has richer element-specific transforms. | Deferred | Not required by the current curated corpus. Track as Markdown fidelity expansion after main content and cleanup remain stable. |
+| Raw Markdown extraction from HTML shells | Detects raw Markdown bodies before DOM extraction can collapse author formatting. | Implemented | `extract_raw_markdown`; `extracts_raw_markdown_body_without_dom_whitespace_loss`. |
+| Bot-only Markdown retry behavior | Reference can retry selected URLs with a bot UA before extracting raw Markdown. | Deferred | Live network retry behavior is not part of the deterministic corpus yet. Current behavior supports configurable `--user-agent` and `--lang`. |
+| Domain-specific social/comment extractors | Reference includes specialized extractors for Reddit, Hacker News, X/Twitter, Mastodon, YouTube, and others. | Partially implemented | GitHub discussion preservation is covered by `github-pull-request`; Hacker News listing extraction is covered by `domain--hacker-news-listing.html`. Broader social/comment domains remain fixture-led follow-up work. |
+| Math, callout, and footnote specialization | Reference has richer element-specific transforms. | Implemented | `converts_math_elements_to_markdown_delimiters`; `converts_callouts_to_obsidian_style_blockquotes`; `converts_footnotes_to_markdown_references`. |
 | Browser/runtime-specific DOM compatibility | Reference supports browser-oriented DOM implementations. | Not applicable | `chidori` is a Rust CLI with `scraper`; parity target is output behavior, not DOM runtime APIs. |
 | NPM library API compatibility | Reference exposes a JS package API in addition to CLI behavior. | Not applicable | `chidori` preserves its Rust CLI architecture with a thin npm binary wrapper. |

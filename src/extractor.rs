@@ -1,5 +1,5 @@
 use crate::{document::ParsedDocument, error::ChidoriError};
-use html_escape::encode_text;
+use html_escape::{encode_double_quoted_attribute, encode_text};
 use scraper::{ElementRef, Selector};
 
 const PRIMARY_ENTRY_SELECTORS: &[&str] = &[
@@ -56,6 +56,10 @@ fn selector_priority(selector_count: usize, selector_index: usize) -> isize {
 }
 
 pub fn extract_main_html(doc: &ParsedDocument) -> Result<String, ChidoriError> {
+    if let Some(html) = hacker_news_listing_candidate(doc)? {
+        return Ok(html);
+    }
+
     let selectors = ScoringSelectors {
         links: Selector::parse("a").map_err(|error| ChidoriError::Unknown(error.to_string()))?,
         paragraphs: Selector::parse("p")
@@ -110,6 +114,146 @@ pub fn extract_main_html(doc: &ParsedDocument) -> Result<String, ChidoriError> {
     } else {
         Err(ChidoriError::ExtractionFailed)
     }
+}
+
+fn hacker_news_listing_candidate(doc: &ParsedDocument) -> Result<Option<String>, ChidoriError> {
+    if doc.url.host_str() != Some("news.ycombinator.com") {
+        return Ok(None);
+    }
+
+    let row_selector =
+        Selector::parse("tr.athing").map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let title_selector = Selector::parse(".titleline a")
+        .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let site_selector =
+        Selector::parse(".sitestr").map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let subtext_selector =
+        Selector::parse("td.subtext").map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let score_selector =
+        Selector::parse(".score").map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let user_selector =
+        Selector::parse(".hnuser").map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let age_selector =
+        Selector::parse(".age a").map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let link_selector =
+        Selector::parse("a").map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+
+    let story_rows: Vec<_> = doc.dom.select(&row_selector).collect();
+    if story_rows.is_empty() {
+        return Ok(None);
+    }
+
+    let subtext_cells: Vec<_> = doc.dom.select(&subtext_selector).collect();
+    let mut output = String::from("<ol class=\"chidori-hn-listing\">");
+    let mut story_count = 0;
+
+    for (index, row) in story_rows.into_iter().enumerate() {
+        let Some(title_link) = row.select(&title_selector).next() else {
+            continue;
+        };
+        let title = element_text(title_link);
+        if title.is_empty() {
+            continue;
+        }
+
+        let href = title_link.value().attr("href").unwrap_or("");
+        let story_url = resolve_url(doc, href);
+        let site = row.select(&site_selector).next().map(element_text);
+        let subtext = subtext_cells.get(index).copied();
+
+        output.push_str("<li>");
+        push_link(&mut output, &story_url, &title);
+        if let Some(site) = site.filter(|site| !site.is_empty()) {
+            output.push_str(" <span class=\"site\">(");
+            output.push_str(&encode_text(&site));
+            output.push_str(")</span>");
+        }
+
+        let mut meta_parts = Vec::new();
+        if let Some(subtext) = subtext {
+            if let Some(score) = subtext
+                .select(&score_selector)
+                .next()
+                .map(element_text)
+                .filter(|score| !score.is_empty())
+            {
+                meta_parts.push(encode_text(&score).to_string());
+            }
+            if let Some(user) = subtext
+                .select(&user_selector)
+                .next()
+                .map(element_text)
+                .filter(|user| !user.is_empty())
+            {
+                meta_parts.push(format!("by {}", encode_text(&user)));
+            }
+            if let Some(age) = subtext
+                .select(&age_selector)
+                .next()
+                .map(element_text)
+                .filter(|age| !age.is_empty())
+            {
+                meta_parts.push(encode_text(&age).to_string());
+            }
+            if let Some((comments_url, comments_text)) = comments_link(doc, subtext, &link_selector)
+            {
+                let mut comments = String::new();
+                push_link(&mut comments, &comments_url, &comments_text);
+                meta_parts.push(comments);
+            }
+        }
+
+        if !meta_parts.is_empty() {
+            output.push_str("<br><small>");
+            output.push_str(&meta_parts.join(" · "));
+            output.push_str("</small>");
+        }
+        output.push_str("</li>");
+        story_count += 1;
+    }
+
+    output.push_str("</ol>");
+
+    if story_count == 0 {
+        Ok(None)
+    } else {
+        Ok(Some(output))
+    }
+}
+
+fn comments_link(
+    doc: &ParsedDocument,
+    subtext: ElementRef<'_>,
+    link_selector: &Selector,
+) -> Option<(String, String)> {
+    subtext
+        .select(link_selector)
+        .filter_map(|link| {
+            let text = element_text(link);
+            let href = link.value().attr("href")?;
+            let is_comment_link = text == "discuss" || text.contains("comment");
+            is_comment_link.then(|| (resolve_url(doc, href), text))
+        })
+        .last()
+}
+
+fn push_link(output: &mut String, url: &str, text: &str) {
+    output.push_str("<a href=\"");
+    output.push_str(&encode_double_quoted_attribute(url));
+    output.push_str("\">");
+    output.push_str(&encode_text(text));
+    output.push_str("</a>");
+}
+
+fn resolve_url(doc: &ParsedDocument, href: &str) -> String {
+    doc.url
+        .join(href)
+        .map(|url| url.to_string())
+        .unwrap_or_else(|_| href.to_string())
+}
+
+fn element_text(element: ElementRef<'_>) -> String {
+    normalize_text(&element.text().collect::<Vec<_>>().join(" "))
 }
 
 fn structured_content_candidate(

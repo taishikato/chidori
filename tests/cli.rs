@@ -130,6 +130,42 @@ async fn json_outputs_metadata_and_markdown() {
 }
 
 #[tokio::test]
+async fn extracts_raw_markdown_body_without_dom_whitespace_loss() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/raw-markdown"))
+        .respond_with(html_response(
+            r#"
+            <html><head><title>Raw Markdown</title></head><body>
+# Raw Markdown
+
+This body is already **Markdown** and should stay that way.
+
+- first item
+- second item with [a link](https://example.com)
+
+    cargo test --all
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/raw-markdown", server.uri()))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "This body is already **Markdown**",
+        ))
+        .stdout(predicate::str::contains(
+            "- second item with [a link](https://example.com)",
+        ))
+        .stdout(predicate::str::contains("    cargo test --all"))
+        .stderr(predicate::str::is_empty());
+}
+
+#[tokio::test]
 async fn json_outputs_extended_metadata() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

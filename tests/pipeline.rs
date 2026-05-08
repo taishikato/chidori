@@ -506,6 +506,34 @@ fn uses_structured_body_when_visible_body_has_no_words() {
 }
 
 #[test]
+fn extracts_hacker_news_listing_items_as_readable_content() {
+    let html = std::fs::read_to_string("tests/fixtures/reference/domain--hacker-news-listing.html")
+        .unwrap();
+    let doc = ParsedDocument::parse(
+        html,
+        Url::parse("https://news.ycombinator.com/news").unwrap(),
+    );
+    let main = extract_main_html(&doc).unwrap();
+    let cleaned = clean_html(&main, &CleanOptions { no_images: false });
+    let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
+
+    assert!(
+        markdown.contains("1. [Launch notes for a useful parser](https://example.com/post-one)")
+    );
+    assert!(markdown.contains("example.com"));
+    assert!(markdown.contains("123 points"));
+    assert!(markdown.contains("ada"));
+    assert!(markdown.contains("17 comments"));
+    assert!(markdown.contains(
+        "2. [Ask HN: Keeping extracted content stable?](https://news.ycombinator.com/item?id=402)"
+    ));
+    assert!(markdown.contains("45 points"));
+    assert!(markdown.contains("discuss"));
+    assert!(!markdown.contains("past"));
+    assert!(!markdown.contains("More"));
+}
+
+#[test]
 fn falls_back_to_plain_structured_body_when_body_only_contains_schema_script() {
     let html = r#"
     <html>
@@ -614,6 +642,69 @@ fn unwraps_javascript_links_without_losing_inner_content() {
     assert!(markdown.contains("A **bold js link** should keep formatting."));
     assert!(markdown.contains("[links](https://example.com)"));
     assert!(!markdown.contains("javascript:"));
+}
+
+#[test]
+fn converts_math_elements_to_markdown_delimiters() {
+    let html = r#"
+    <article>
+      <p>Inline energy uses <math data-latex="E=mc^2"></math> in prose.</p>
+      <math display="block" data-latex="\int_0^1 x\,dx = \frac{1}{2}"></math>
+    </article>"#;
+
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("Inline energy uses $E=mc^2$ in prose."));
+    assert!(markdown.contains("$$\n\\int_0^1 x\\,dx = \\frac{1}{2}\n$$"));
+    assert!(!markdown.contains("<math"));
+}
+
+#[test]
+fn converts_single_quoted_math_attributes() {
+    let html = r#"
+    <article>
+      <p>Inline acceleration uses <math data-latex='a=b^2'></math> in prose.</p>
+    </article>"#;
+
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("Inline acceleration uses $a=b^2$ in prose."));
+}
+
+#[test]
+fn converts_callouts_to_obsidian_style_blockquotes() {
+    let html = r#"
+    <article>
+      <div class="callout" data-callout="warning">
+        <div class="callout-title"><div class="callout-title-inner">Careful</div></div>
+        <div class="callout-content"><p>Do not delete the quoted payload.</p></div>
+      </div>
+    </article>"#;
+
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("> [!warning] Careful"));
+    assert!(markdown.contains("> Do not delete the quoted payload."));
+    assert!(!markdown.contains("callout-title"));
+}
+
+#[test]
+fn converts_footnotes_to_markdown_references() {
+    let html = r##"
+    <article>
+      <p>The parser keeps cited claims<sup id="fnref-1"><a href="#fn-1">1</a></sup> readable.</p>
+      <section id="footnotes">
+        <ol>
+          <li id="fn-1"><p>Footnote text survives. <a class="footnote-backref" href="#fnref-1">↩</a></p></li>
+        </ol>
+      </section>
+    </article>"##;
+
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("cited claims[^1] readable."));
+    assert!(markdown.contains("[^1]: Footnote text survives."));
+    assert!(!markdown.contains("↩"));
 }
 
 #[test]

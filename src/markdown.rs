@@ -6,8 +6,9 @@ pub struct MarkdownOptions {
 }
 
 pub fn html_to_markdown(html: &str, options: &MarkdownOptions) -> String {
-    let code_block_languages = code_block_languages(html);
-    let mut markdown = html2md::parse_html(html);
+    let specialized = SpecializedHtml::from(html);
+    let code_block_languages = code_block_languages(&specialized.html);
+    let mut markdown = html2md::parse_html(&specialized.html);
     markdown = markdown
         .lines()
         .map(str::trim_end)
@@ -18,11 +19,356 @@ pub fn html_to_markdown(html: &str, options: &MarkdownOptions) -> String {
         .to_string();
     markdown = normalize_setext_headings(&markdown);
     markdown = annotate_code_fences(&markdown, &code_block_languages);
+    markdown = specialized.restore(markdown);
 
     if let Some(max_chars) = options.max_chars {
         markdown = markdown.chars().take(max_chars).collect();
     }
     markdown
+}
+
+pub fn extract_raw_markdown(html: &str) -> Option<String> {
+    let body = body_inner_html(html)?;
+    let without_scripts = remove_raw_tag(
+        &remove_raw_tag(&remove_raw_tag(body, "script"), "style"),
+        "noscript",
+    );
+    let text = strip_tags(&without_scripts);
+    let markdown = html_escape::decode_html_entities(&text)
+        .trim()
+        .replace("\r\n", "\n")
+        .replace('\r', "\n");
+    if !looks_like_markdown(&markdown) {
+        return None;
+    }
+    Some(markdown.replace("\n\n\n", "\n\n").trim().to_string())
+}
+
+fn body_inner_html(html: &str) -> Option<&str> {
+    let lower = html.to_ascii_lowercase();
+    let body_start = lower.find("<body")?;
+    let body_open_end = lower[body_start..].find('>')? + body_start + 1;
+    let body_close = lower[body_open_end..].find("</body>")? + body_open_end;
+    Some(&html[body_open_end..body_close])
+}
+
+fn remove_raw_tag(html: &str, tag: &str) -> String {
+    let mut output = String::with_capacity(html.len());
+    let mut rest = html;
+    let open = format!("<{tag}");
+    let close = format!("</{tag}>");
+
+    loop {
+        let lower = rest.to_ascii_lowercase();
+        let Some(start) = lower.find(&open) else {
+            output.push_str(rest);
+            return output;
+        };
+        output.push_str(&rest[..start]);
+        let Some(end) = lower[start..].find(&close) else {
+            return output;
+        };
+        rest = &rest[start + end + close.len()..];
+    }
+}
+
+fn strip_tags(html: &str) -> String {
+    let mut output = String::with_capacity(html.len());
+    let mut in_tag = false;
+    for ch in html.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' if in_tag => in_tag = false,
+            _ if !in_tag => output.push(ch),
+            _ => {}
+        }
+    }
+    output
+}
+
+fn looks_like_markdown(content: &str) -> bool {
+    let mut signals = 0;
+    if content.lines().any(|line| line.starts_with("# ")) {
+        signals += 1;
+    }
+    if content.contains("**") {
+        signals += 1;
+    }
+    if content.contains("](") {
+        signals += 1;
+    }
+    if content
+        .lines()
+        .any(|line| line.trim_start().starts_with("- "))
+    {
+        signals += 1;
+    }
+    if content
+        .lines()
+        .any(|line| line.trim_start().starts_with("> "))
+    {
+        signals += 1;
+    }
+    if content.contains("```") || content.lines().any(|line| line.starts_with("    ")) {
+        signals += 1;
+    }
+    signals >= 2
+}
+
+struct SpecializedHtml {
+    html: String,
+    replacements: Vec<(String, String)>,
+    footnotes: Vec<(String, String)>,
+}
+
+impl SpecializedHtml {
+    fn from(html: &str) -> Self {
+        let mut specialized = Self {
+            html: html.to_string(),
+            replacements: Vec::new(),
+            footnotes: Vec::new(),
+        };
+        specialized.replace_math();
+        specialized.replace_callouts();
+        specialized.replace_footnotes();
+        specialized
+    }
+
+    fn restore(self, mut markdown: String) -> String {
+        for (placeholder, value) in self.replacements {
+            markdown = markdown.replace(&placeholder, &value);
+        }
+
+        if !self.footnotes.is_empty() {
+            markdown.push_str("\n\n---\n\n");
+            for (id, text) in self.footnotes {
+                markdown.push_str(&format!("[^{id}]: {text}\n\n"));
+            }
+            markdown = markdown.trim().to_string();
+        }
+
+        markdown
+    }
+
+    fn push_replacement(&mut self, value: String) -> String {
+        let placeholder = format!("CHIDORISPECIAL{}", self.replacements.len());
+        self.replacements.push((placeholder.clone(), value));
+        placeholder
+    }
+
+    fn replace_math(&mut self) {
+        let source = std::mem::take(&mut self.html);
+        let mut output = String::with_capacity(source.len());
+        let mut rest = source.as_str();
+
+        while let Some(index) = rest.find("<math") {
+            output.push_str(&rest[..index]);
+            let candidate = &rest[index..];
+            let Some(open_end) = candidate.find('>') else {
+                output.push_str(candidate);
+                self.html = output;
+                return;
+            };
+            let opening_tag = &candidate[..=open_end];
+            let Some(close_start) = candidate[open_end + 1..].find("</math>") else {
+                output.push_str(candidate);
+                self.html = output;
+                return;
+            };
+            let content_start = open_end + 1;
+            let content_end = content_start + close_start;
+            let inner_html = &candidate[content_start..content_end];
+            let after = content_end + "</math>".len();
+            let latex = attr_value(opening_tag, "data-latex")
+                .or_else(|| attr_value(opening_tag, "alttext"))
+                .or_else(|| annotation_latex(inner_html))
+                .unwrap_or_else(|| text_from_html(inner_html));
+            let replacement = if opening_tag
+                .to_ascii_lowercase()
+                .contains("display=\"block\"")
+                || opening_tag.to_ascii_lowercase().contains("display='block'")
+            {
+                format!("\n$$\n{}\n$$\n", latex.trim())
+            } else {
+                format!("${}$", latex.trim())
+            };
+            let placeholder = self.push_replacement(replacement);
+            output.push_str(&placeholder);
+            rest = &candidate[after..];
+        }
+
+        output.push_str(rest);
+        self.html = output;
+    }
+
+    fn replace_callouts(&mut self) {
+        let source = std::mem::take(&mut self.html);
+        let mut output = String::with_capacity(source.len());
+        let mut rest = source.as_str();
+
+        while let Some(index) = rest.find("<div") {
+            output.push_str(&rest[..index]);
+            let candidate = &rest[index..];
+            let Some(open_end) = candidate.find('>') else {
+                output.push_str(candidate);
+                self.html = output;
+                return;
+            };
+            let opening_tag = &candidate[..=open_end];
+            if !(has_class_token(opening_tag, "callout")
+                && attr_value(opening_tag, "data-callout").is_some())
+            {
+                output.push_str("<div");
+                rest = &candidate["<div".len()..];
+                continue;
+            }
+            let Some(close_end) = find_matching_close(candidate, "div", open_end + 1) else {
+                output.push_str(candidate);
+                self.html = output;
+                return;
+            };
+            let fragment = &candidate[..close_end];
+            let kind =
+                attr_value(opening_tag, "data-callout").unwrap_or_else(|| "note".to_string());
+            let replacement = callout_markdown(fragment, &kind);
+            let placeholder = self.push_replacement(replacement);
+            output.push_str(&placeholder);
+            rest = &candidate[close_end..];
+        }
+
+        output.push_str(rest);
+        self.html = output;
+    }
+
+    fn replace_footnotes(&mut self) {
+        self.html = replace_footnote_refs(&self.html);
+        let source = std::mem::take(&mut self.html);
+        let mut output = String::with_capacity(source.len());
+        let mut rest = source.as_str();
+
+        while let Some(index) = rest.find("<section") {
+            output.push_str(&rest[..index]);
+            let candidate = &rest[index..];
+            let Some(open_end) = candidate.find('>') else {
+                output.push_str(candidate);
+                self.html = output;
+                return;
+            };
+            let opening_tag = &candidate[..=open_end];
+            if attr_value(opening_tag, "id").as_deref() != Some("footnotes") {
+                output.push_str("<section");
+                rest = &candidate["<section".len()..];
+                continue;
+            }
+            let Some(close_end) = find_matching_close(candidate, "section", open_end + 1) else {
+                output.push_str(candidate);
+                self.html = output;
+                return;
+            };
+            self.footnotes
+                .extend(footnotes_from_section(&candidate[..close_end]));
+            rest = &candidate[close_end..];
+        }
+
+        output.push_str(rest);
+        self.html = output;
+    }
+}
+
+fn callout_markdown(fragment: &str, kind: &str) -> String {
+    let dom = Html::parse_fragment(fragment);
+    let title_selector = Selector::parse(".callout-title-inner, .callout-title").unwrap();
+    let content_selector = Selector::parse(".callout-content").unwrap();
+    let title = dom
+        .select(&title_selector)
+        .next()
+        .map(|element| element.text().collect::<Vec<_>>().join(" "))
+        .map(|text| text.split_whitespace().collect::<Vec<_>>().join(" "))
+        .unwrap_or_default();
+    let content_html = dom
+        .select(&content_selector)
+        .next()
+        .map(|element| element.inner_html())
+        .unwrap_or_else(|| fragment.to_string());
+    let content_markdown = html2md::parse_html(&content_html);
+    let content = content_markdown
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    let mut lines = vec![format!("> [!{}] {}", kind.trim(), title.trim())
+        .trim_end()
+        .to_string()];
+    for line in content {
+        lines.push(format!("> {line}"));
+    }
+    lines.join("\n")
+}
+
+fn replace_footnote_refs(html: &str) -> String {
+    let mut output = String::with_capacity(html.len());
+    let mut rest = html;
+
+    while let Some(index) = rest.find("<sup") {
+        output.push_str(&rest[..index]);
+        let candidate = &rest[index..];
+        let Some(open_end) = candidate.find('>') else {
+            output.push_str(candidate);
+            return output;
+        };
+        let opening_tag = &candidate[..=open_end];
+        let Some(close_start) = candidate[open_end + 1..].find("</sup>") else {
+            output.push_str(candidate);
+            return output;
+        };
+        let content_start = open_end + 1;
+        let content_end = content_start + close_start;
+        let inner_html = &candidate[content_start..content_end];
+        let after = content_end + "</sup>".len();
+        if let Some(id) = footnote_id(opening_tag).or_else(|| footnote_id(inner_html)) {
+            output.push_str(&format!("[^{id}]"));
+        } else {
+            output.push_str(&candidate[..after]);
+        }
+        rest = &candidate[after..];
+    }
+
+    output.push_str(rest);
+    output
+}
+
+fn footnotes_from_section(fragment: &str) -> Vec<(String, String)> {
+    let dom = Html::parse_fragment(fragment);
+    let item_selector = Selector::parse("li[id]").unwrap();
+    dom.select(&item_selector)
+        .filter_map(|item| {
+            let id = item.value().attr("id").and_then(|id| {
+                id.strip_prefix("fn-")
+                    .or_else(|| id.strip_prefix("footnote-"))
+                    .map(str::to_string)
+            })?;
+            let mut text = item.text().collect::<Vec<_>>().join(" ");
+            text = text.replace('↩', "");
+            text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            (!text.is_empty()).then_some((id, text))
+        })
+        .collect()
+}
+
+fn footnote_id(value: &str) -> Option<String> {
+    for needle in ["#fn-", "#footnote-", "fnref-", "footnote-ref-"] {
+        if let Some(start) = value.find(needle) {
+            let id_start = start + needle.len();
+            let id = value[id_start..]
+                .chars()
+                .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '-' || *ch == '_')
+                .collect::<String>();
+            if !id.is_empty() {
+                return Some(id);
+            }
+        }
+    }
+    None
 }
 
 fn normalize_setext_headings(markdown: &str) -> String {
@@ -163,4 +509,113 @@ fn sanitize_language(language: &str) -> Option<String> {
         .collect::<String>();
 
     (!sanitized.is_empty()).then_some(sanitized)
+}
+
+fn attr_value(opening_tag: &str, name: &str) -> Option<String> {
+    for quote in ['"', '\''] {
+        let pattern = format!("{name}={quote}");
+        let Some(start) = opening_tag.find(&pattern) else {
+            continue;
+        };
+        let start = start + pattern.len();
+        let value = &opening_tag[start..];
+        let Some(end) = value.find(quote) else {
+            continue;
+        };
+        return Some(html_escape::decode_html_entities(&value[..end]).to_string());
+    }
+    None
+}
+
+fn annotation_latex(html: &str) -> Option<String> {
+    let dom = Html::parse_fragment(html);
+    let selector = Selector::parse("annotation").ok()?;
+    dom.select(&selector).find_map(|annotation| {
+        annotation
+            .value()
+            .attr("encoding")
+            .filter(|encoding| encoding.eq_ignore_ascii_case("application/x-tex"))
+            .map(|_| {
+                annotation
+                    .text()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .filter(|text| !text.is_empty())
+    })
+}
+
+fn text_from_html(html: &str) -> String {
+    Html::parse_fragment(html)
+        .root_element()
+        .text()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn has_class_token(opening_tag: &str, expected: &str) -> bool {
+    attr_value(opening_tag, "class").is_some_and(|classes| {
+        classes
+            .split_ascii_whitespace()
+            .any(|token| token == expected)
+    })
+}
+
+fn find_matching_close(html: &str, tag: &str, search_start: usize) -> Option<usize> {
+    let mut depth = 1;
+    let mut offset = search_start;
+
+    while let Some(index) = html[offset..].find('<') {
+        let start = offset + index;
+        let candidate = &html[start..];
+
+        if closing_tag_name_matches(&candidate[1..], tag) {
+            if let Some(end) = candidate.find('>') {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(start + end + 1);
+                }
+                offset = start + end + 1;
+                continue;
+            }
+        } else if tag_name_matches(&candidate[1..], tag) {
+            if let Some(end) = candidate.find('>') {
+                if !candidate[..=end].ends_with("/>") {
+                    depth += 1;
+                }
+                offset = start + end + 1;
+                continue;
+            }
+        }
+
+        offset = start + 1;
+    }
+
+    None
+}
+
+fn tag_name_matches(input: &str, tag: &str) -> bool {
+    let mut chars = input.chars();
+    for expected in tag.chars() {
+        match chars.next() {
+            Some(actual) if actual.eq_ignore_ascii_case(&expected) => {}
+            _ => return false,
+        }
+    }
+
+    chars
+        .next()
+        .is_some_and(|ch| ch.is_ascii_whitespace() || ch == '>' || ch == '/')
+}
+
+fn closing_tag_name_matches(input: &str, tag: &str) -> bool {
+    input
+        .strip_prefix('/')
+        .is_some_and(|rest| tag_name_matches(rest, tag))
 }

@@ -143,6 +143,18 @@ fn matches_reference_pages_for_representative_urls() {
             ],
             rejected: &["Maybe there's a pattern here?", "The real data wall"],
         },
+        Case {
+            fixture: "domain--hacker-news-listing.html",
+            url: "https://news.ycombinator.com/news",
+            expected: &[
+                "1. [Launch notes for a useful parser](https://example.com/post-one)",
+                "123 points",
+                "17 comments",
+                "2. [Ask HN: Keeping extracted content stable?](https://news.ycombinator.com/item?id=402)",
+                "discuss",
+            ],
+            rejected: &["past", "More"],
+        },
     ];
 
     for case in cases {

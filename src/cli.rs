@@ -104,19 +104,27 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
     metadata.url = config.url.to_string();
     metadata.final_url = page.final_url.to_string();
 
-    let main_html = crate::extractor::extract_main_html(&doc)?;
-    let cleaned = crate::cleaner::clean_html(
-        &main_html,
-        &crate::cleaner::CleanOptions {
-            no_images: config.no_images,
-        },
-    );
-    let markdown = crate::markdown::html_to_markdown(
-        &cleaned,
-        &crate::markdown::MarkdownOptions {
-            max_chars: config.max_chars,
-        },
-    );
+    let markdown = if let Some(raw_markdown) = crate::markdown::extract_raw_markdown(&doc.html) {
+        if let Some(max_chars) = config.max_chars {
+            raw_markdown.chars().take(max_chars).collect()
+        } else {
+            raw_markdown
+        }
+    } else {
+        let main_html = crate::extractor::extract_main_html(&doc)?;
+        let cleaned = crate::cleaner::clean_html(
+            &main_html,
+            &crate::cleaner::CleanOptions {
+                no_images: config.no_images,
+            },
+        );
+        crate::markdown::html_to_markdown(
+            &cleaned,
+            &crate::markdown::MarkdownOptions {
+                max_chars: config.max_chars,
+            },
+        )
+    };
 
     if markdown.trim().is_empty() {
         return Err(ChidoriError::ExtractionFailed);
