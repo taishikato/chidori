@@ -43,7 +43,8 @@ pub fn extract_metadata(doc: &ParsedDocument) -> Metadata {
             .or_else(|| schema_string(&schema_org_data, &["image.url", "image"]))
             .unwrap_or_default(),
         site: meta(doc, "property", "og:site_name")
-            .or_else(|| schema_string(&schema_org_data, &["publisher.name", "WebSite.name"]))
+            .or_else(|| schema_string(&schema_org_data, &["publisher.name"]))
+            .or_else(|| schema_type_string(&schema_org_data, "WebSite", "name"))
             .unwrap_or_default(),
         author: meta(doc, "name", "author")
             .or_else(|| meta(doc, "property", "article:author"))
@@ -136,6 +137,54 @@ fn schema_string(schema: &Option<Value>, paths: &[&str]) -> Option<String> {
             .filter_map(value_to_string)
             .find(|value| !value.trim().is_empty())
     })
+}
+
+fn schema_type_string(schema: &Option<Value>, schema_type: &str, property: &str) -> Option<String> {
+    let schema = schema.as_ref()?;
+    find_typed_nodes(schema, schema_type)
+        .into_iter()
+        .filter_map(|node| match node {
+            Value::Object(map) => map.get(property).and_then(value_to_string),
+            _ => None,
+        })
+        .find(|value| !value.trim().is_empty())
+}
+
+fn find_typed_nodes<'a>(value: &'a Value, schema_type: &str) -> Vec<&'a Value> {
+    let mut matches = Vec::new();
+
+    match value {
+        Value::Object(map) => {
+            if map
+                .get("@type")
+                .is_some_and(|value| value_matches_schema_type(value, schema_type))
+            {
+                matches.push(value);
+            }
+
+            for child in map.values() {
+                matches.extend(find_typed_nodes(child, schema_type));
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                matches.extend(find_typed_nodes(item, schema_type));
+            }
+        }
+        _ => {}
+    }
+
+    matches
+}
+
+fn value_matches_schema_type(value: &Value, schema_type: &str) -> bool {
+    match value {
+        Value::String(value) => value == schema_type,
+        Value::Array(items) => items
+            .iter()
+            .any(|item| value_matches_schema_type(item, schema_type)),
+        _ => false,
+    }
 }
 
 fn find_path_deep<'a>(value: &'a Value, parts: &[&str]) -> Vec<&'a Value> {

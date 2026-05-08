@@ -99,9 +99,13 @@ pub fn extract_main_html(doc: &ParsedDocument) -> Result<String, ChidoriError> {
         }
     }
 
-    best_candidate
-        .map(|candidate| candidate.html)
-        .ok_or(ChidoriError::ExtractionFailed)
+    if let Some(candidate) = best_candidate {
+        Ok(candidate.html)
+    } else if let Some(html) = structured_content_candidate(doc, 0)? {
+        Ok(html)
+    } else {
+        Err(ChidoriError::ExtractionFailed)
+    }
 }
 
 fn structured_content_candidate(

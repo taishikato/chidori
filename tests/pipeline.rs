@@ -80,6 +80,30 @@ fn extracts_extended_metadata_from_social_and_structured_sources() {
 }
 
 #[test]
+fn extracts_site_name_from_website_schema_node() {
+    let html = r#"<!doctype html>
+    <html lang="en">
+      <head>
+        <title>Article Title</title>
+        <script type="application/ld+json">
+          {
+            "@context": "https://schema.org",
+            "@graph": [
+              { "@type": "WebSite", "name": "Example Journal" },
+              { "@type": "Article", "headline": "Article Title" }
+            ]
+          }
+        </script>
+      </head>
+      <body><article><p>Hello world.</p></article></body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.site, "Example Journal");
+}
+
+#[test]
 fn extracts_article_over_navigation() {
     let html = r#"
     <html><body>
@@ -331,6 +355,28 @@ fn uses_structured_body_when_it_is_more_complete_than_visible_shell() {
     assert!(main.contains("full article body"));
     assert!(main.contains("<strong>full article body</strong>"));
     assert!(!main.contains("Short shell"));
+}
+
+#[test]
+fn uses_structured_body_when_visible_body_has_no_words() {
+    let html = r#"
+    <html>
+      <head>
+        <script type="application/ld+json">
+          {
+            "@context": "https://schema.org",
+            "@type": "Article",
+            "articleBody": "Only structured article text is available here, but it is still useful content for agents."
+          }
+        </script>
+      </head>
+      <body></body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("Only structured article text is available here"));
 }
 
 #[test]
