@@ -219,6 +219,41 @@ fn matches_reference_pages_for_representative_urls() {
             ],
         },
         Case {
+            fixture: "domain--microblog-status-thread.html",
+            url: "https://x.com/parserbird/status/1788600000000000000",
+            expected: &[
+                "Chidori Parser",
+                "@parserbird",
+                "May 8, 2026",
+                "Status extraction works best when the saved Markdown starts with the post people came for.",
+                "[chidori.dev/notes](https://t.co/chidori)",
+                "> Reader Fox",
+                "> @readerfox",
+                "> This keeps short status threads useful from a terminal.",
+                "Quote Cat",
+                "@quotecat",
+                "Quoted status text should remain attached without importing the whole page.",
+            ],
+            rejected: &[
+                "Context Owl",
+                "Earlier conversation context should not become the saved status.",
+                "Home",
+                "Explore",
+                "Log in",
+                "Who to follow",
+                "Promoted Account",
+                "Promoted post",
+                "What’s happening",
+                "Sidebar trend",
+                "Reply",
+                "Repost",
+                "Like",
+                "Share",
+                "Create account",
+                "Terms of Service",
+            ],
+        },
+        Case {
             fixture: "domain--video-watch-page.html",
             url: "https://www.youtube.com/watch?v=abc123xyz",
             expected: &[
@@ -353,6 +388,55 @@ fn federated_status_reply_is_nested_once() {
         &markdown,
         "This makes saved social threads much easier to read from the CLI.",
     );
+}
+
+#[test]
+fn microblog_status_thread_keeps_primary_status_and_replies_only() {
+    let markdown = fixture_to_markdown(
+        "domain--microblog-status-thread.html",
+        "https://x.com/parserbird/status/1788600000000000000",
+    );
+
+    assert_contains_all(
+        &markdown,
+        &[
+            "Chidori Parser",
+            "@parserbird",
+            "May 8, 2026",
+            "Status extraction works best when the saved Markdown starts with the post people came for.",
+            "[chidori.dev/notes](https://t.co/chidori)",
+            "> Reader Fox",
+            "> @readerfox",
+            "> This keeps short status threads useful from a terminal.",
+            "Quote Cat",
+            "@quotecat",
+            "Quoted status text should remain attached without importing the whole page.",
+        ],
+    );
+    assert_contains_none(
+        &markdown,
+        &[
+            "Context Owl",
+            "Earlier conversation context should not become the saved status.",
+            "Home",
+            "Explore",
+            "Log in",
+            "Who to follow",
+            "Promoted Account",
+            "Promoted post",
+            "What’s happening",
+            "Sidebar trend",
+            "Reply",
+            "Repost",
+            "Like",
+            "Share",
+            "Create account",
+            "Terms of Service",
+        ],
+    );
+    assert_occurs_once(&markdown, "Chidori Parser");
+    assert_occurs_once(&markdown, "Reader Fox");
+    assert_occurs_once(&markdown, "Quote Cat");
 }
 
 #[test]

@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Chidori Parser on X</title>
+  </head>
+  <body>
+    <header>
+      <nav aria-label="Primary">
+        <a href="/home">Home</a>
+        <a href="/explore">Explore</a>
+        <a href="/i/flow/login">Log in</a>
+      </nav>
+    </header>
+
+    <main role="main">
+      <section aria-label="Timeline: Conversation">
+        <article data-testid="tweet" role="article">
+          <div data-testid="User-Name">
+            <a href="/contextowl">
+              <span>Context Owl</span>
+              <span>@contextowl</span>
+            </a>
+            <a href="/contextowl/status/1788500000000000000">
+              <time datetime="2026-05-08T18:00:00.000Z">May 8, 2026</time>
+            </a>
+          </div>
+          <div data-testid="tweetText">
+            <span>Earlier conversation context should not become the saved status.</span>
+          </div>
+        </article>
+
+        <article data-testid="tweet" role="article">
+          <div data-testid="User-Name">
+            <a href="/parserbird">
+              <span>Chidori Parser</span>
+              <span>@parserbird</span>
+            </a>
+            <a href="/parserbird/status/1788600000000000000">
+              <time datetime="2026-05-08T18:42:00.000Z">May 8, 2026</time>
+            </a>
+          </div>
+          <div data-testid="tweetText">
+            <span>Status extraction works best when the saved Markdown starts with the post people came for.</span>
+            <br>
+            <span>Links should survive too: </span>
+            <a href="https://t.co/chidori">chidori.dev/notes</a>
+          </div>
+          <article data-testid="tweet" role="article">
+            <div data-testid="User-Name">
+              <a href="/quotecat">
+                <span>Quote Cat</span>
+                <span>@quotecat</span>
+              </a>
+              <a href="/quotecat/status/1788602000000000000">
+                <time datetime="2026-05-08T19:30:00.000Z">May 8, 2026</time>
+              </a>
+            </div>
+            <div data-testid="tweetText">
+              <span>Quoted status text should remain attached without importing the whole page.</span>
+            </div>
+          </article>
+          <div aria-label="Timeline actions">
+            <button>Reply</button>
+            <button>Repost</button>
+            <button>Like</button>
+            <button>Share</button>
+          </div>
+        </article>
+
+        <article data-testid="tweet" role="article">
+          <div data-testid="User-Name">
+            <a href="/readerfox">
+              <span>Reader Fox</span>
+              <span>@readerfox</span>
+            </a>
+            <a href="/readerfox/status/1788601000000000000">
+              <time datetime="2026-05-08T19:10:00.000Z">May 8, 2026</time>
+            </a>
+          </div>
+          <div data-testid="tweetText">
+            <span>This keeps short status threads useful from a terminal.</span>
+          </div>
+          <div aria-label="Timeline actions">
+            <button>Reply</button>
+            <button>Repost</button>
+            <button>Like</button>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <aside aria-label="Relevant people">
+      <h2>Who to follow</h2>
+      <article data-testid="tweet" role="article">
+        <div data-testid="User-Name">
+          <a href="/promotedaccount">
+            <span>Promoted Account</span>
+            <span>@promotedaccount</span>
+          </a>
+          <a href="/promotedaccount/status/1788700000000000000">
+            <time datetime="2026-05-08T20:00:00.000Z">May 8, 2026</time>
+          </a>
+        </div>
+        <div data-testid="tweetText">
+          <span>Promoted post that should not be extracted.</span>
+        </div>
+      </article>
+    </aside>
+
+    <section aria-label="Trends">
+      <h2>What’s happening</h2>
+      <p>Sidebar trend that should stay out of Markdown.</p>
+    </section>
+
+    <footer>
+      <button>Sign in</button>
+      <button>Create account</button>
+      <p>Terms of Service Privacy Policy Cookie Policy Ads info</p>
+    </footer>
+  </body>
+</html>
