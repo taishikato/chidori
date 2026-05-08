@@ -33,6 +33,14 @@ fn assert_contains_none(markdown: &str, snippets: &[&str]) {
     }
 }
 
+fn assert_occurs_once(markdown: &str, snippet: &str) {
+    assert_eq!(
+        markdown.matches(snippet).count(),
+        1,
+        "expected markdown to contain {snippet:?} exactly once\n\n{markdown}"
+    );
+}
+
 #[test]
 fn matches_reference_pages_for_representative_urls() {
     struct Case<'a> {
@@ -188,6 +196,25 @@ fn matches_reference_pages_for_representative_urls() {
         assert_contains_all(&markdown, case.expected);
         assert_contains_none(&markdown, case.rejected);
     }
+}
+
+#[test]
+fn reddit_reference_reply_is_nested_once() {
+    let markdown = fixture_to_markdown(
+        "domain--reddit-discussion.html",
+        "https://www.reddit.com/r/rust/comments/abc123/example_post/",
+    );
+
+    assert_contains_all(
+        &markdown,
+        &[
+            "> u/borrowedbits",
+            "> 28 points · 2 days ago",
+            "> That phrasing helped me too",
+        ],
+    );
+    assert_occurs_once(&markdown, "u/borrowedbits");
+    assert_occurs_once(&markdown, "That phrasing helped me too");
 }
 
 #[test]

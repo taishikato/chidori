@@ -51,6 +51,14 @@ struct ScoringSelectors {
     body_content_blocks: Selector,
 }
 
+struct RedditSelectors {
+    comments: Selector,
+    wrappers: Selector,
+    body: Selector,
+    users: Selector,
+    times: Selector,
+}
+
 fn selector_priority(selector_count: usize, selector_index: usize) -> isize {
     ((selector_count - selector_index) * 40) as isize
 }
@@ -141,11 +149,16 @@ fn reddit_discussion_candidate(doc: &ParsedDocument) -> Result<Option<String>, C
             .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
     let time_selector =
         Selector::parse("time").map_err(|error| ChidoriError::Unknown(error.to_string()))?;
-    let comment_selector = Selector::parse("shreddit-comment, [data-testid=\"comment\"]")
-        .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
-    let comment_body_selector =
-        Selector::parse("[slot=\"comment\"], [data-testid=\"comment\"] .md")
-            .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let reddit_selectors = RedditSelectors {
+        comments: Selector::parse("shreddit-comment, [data-testid=\"comment\"]")
+            .map_err(|error| ChidoriError::Unknown(error.to_string()))?,
+        wrappers: Selector::parse("shreddit-comment, [data-testid=\"comment\"]")
+            .map_err(|error| ChidoriError::Unknown(error.to_string()))?,
+        body: Selector::parse("[slot=\"comment\"], [data-testid=\"comment\"] .md")
+            .map_err(|error| ChidoriError::Unknown(error.to_string()))?,
+        users: user_selector,
+        times: time_selector,
+    };
 
     let Some(post) = doc.dom.select(&post_selector).next() else {
         return Ok(None);
@@ -166,14 +179,14 @@ fn reddit_discussion_candidate(doc: &ParsedDocument) -> Result<Option<String>, C
     output.push_str("</h1>");
 
     let mut post_meta = Vec::new();
-    if let Some(author) = post_author(post, &user_selector) {
+    if let Some(author) = post_author(post, &reddit_selectors.users) {
         post_meta.push(author);
     }
     if let Some(score) = post_score(post, &score_selector) {
         post_meta.push(score);
     }
     if let Some(date) = post
-        .select(&time_selector)
+        .select(&reddit_selectors.times)
         .next()
         .map(element_text)
         .filter(|date| !date.is_empty())
@@ -186,7 +199,7 @@ fn reddit_discussion_candidate(doc: &ParsedDocument) -> Result<Option<String>, C
         output.push_str(&body.inner_html());
     }
 
-    let comments: Vec<_> = doc.dom.select(&comment_selector).collect();
+    let comments: Vec<_> = doc.dom.select(&reddit_selectors.comments).collect();
     if !comments.is_empty() {
         output.push_str("<h2>Comments</h2>");
         for comment in comments
@@ -194,15 +207,7 @@ fn reddit_discussion_candidate(doc: &ParsedDocument) -> Result<Option<String>, C
             .copied()
             .filter(|comment| comment_depth(*comment) == 0)
         {
-            push_reddit_comment(
-                &mut output,
-                comment,
-                &comment_selector,
-                &comment_body_selector,
-                &user_selector,
-                &time_selector,
-                0,
-            );
+            push_reddit_comment(&mut output, comment, &reddit_selectors, 0);
         }
     }
 
@@ -257,10 +262,7 @@ fn push_meta_paragraph(output: &mut String, parts: &[String]) {
 fn push_reddit_comment(
     output: &mut String,
     comment: ElementRef<'_>,
-    comment_selector: &Selector,
-    body_selector: &Selector,
-    user_selector: &Selector,
-    time_selector: &Selector,
+    selectors: &RedditSelectors,
     depth: usize,
 ) {
     if depth > 0 {
@@ -270,17 +272,20 @@ fn push_reddit_comment(
     }
 
     let mut meta = Vec::new();
-    if let Some(author) = comment_author(comment, user_selector) {
+    if let Some(author) = comment_author(comment, selectors) {
         output.push_str("<p>");
         output.push_str(&encode_text(&author));
         output.push_str("</p>");
     }
-    if let Some(score) = comment_score(comment) {
+    if let Some(score) = comment_score(comment, selectors) {
         meta.push(score);
     }
     if let Some(date) = comment
-        .select(time_selector)
-        .next()
+        .descendent_elements()
+        .find(|element| {
+            selectors.times.matches(element)
+                && nearest_reddit_comment(*element, &selectors.wrappers) == Some(comment)
+        })
         .map(element_text)
         .filter(|date| !date.is_empty())
     {
@@ -288,24 +293,19 @@ fn push_reddit_comment(
     }
     push_meta_paragraph(output, &meta);
 
-    if let Some(body) = comment.select(body_selector).next() {
+    if let Some(body) = comment.descendent_elements().find(|element| {
+        selectors.body.matches(element)
+            && nearest_reddit_comment(*element, &selectors.wrappers) == Some(comment)
+    }) {
         output.push_str(&body.inner_html());
     }
 
     let child_depth = depth + 1;
     for reply in comment
-        .select(comment_selector)
+        .select(&selectors.comments)
         .filter(|reply| comment_depth(*reply) == child_depth)
     {
-        push_reddit_comment(
-            output,
-            reply,
-            comment_selector,
-            body_selector,
-            user_selector,
-            time_selector,
-            child_depth,
-        );
+        push_reddit_comment(output, reply, selectors, child_depth);
     }
 
     if depth > 0 {
@@ -315,20 +315,42 @@ fn push_reddit_comment(
     }
 }
 
-fn comment_author(comment: ElementRef<'_>, user_selector: &Selector) -> Option<String> {
+fn comment_author(comment: ElementRef<'_>, selectors: &RedditSelectors) -> Option<String> {
     comment
         .value()
         .attr("author")
         .map(|author| format!("u/{author}"))
-        .or_else(|| comment.select(user_selector).next().map(element_text))
+        .or_else(|| {
+            comment
+                .descendent_elements()
+                .find(|element| {
+                    selectors.users.matches(element)
+                        && nearest_reddit_comment(*element, &selectors.wrappers) == Some(comment)
+                })
+                .map(element_text)
+        })
         .filter(|author| !author.is_empty())
 }
 
-fn comment_score(comment: ElementRef<'_>) -> Option<String> {
+fn comment_score(comment: ElementRef<'_>, selectors: &RedditSelectors) -> Option<String> {
     comment
         .value()
         .attr("score")
         .map(ToString::to_string)
+        .or_else(|| {
+            comment.descendent_elements().find_map(|element| {
+                if nearest_reddit_comment(element, &selectors.wrappers) != Some(comment) {
+                    return None;
+                }
+                let score = element.value().attr("score")?;
+                if score.is_empty() {
+                    let text = element_text(element);
+                    (!text.is_empty()).then_some(text)
+                } else {
+                    Some(score.to_string())
+                }
+            })
+        })
         .filter(|score| !score.is_empty())
 }
 
@@ -337,7 +359,28 @@ fn comment_depth(comment: ElementRef<'_>) -> usize {
         .value()
         .attr("depth")
         .and_then(|depth| depth.parse().ok())
-        .unwrap_or(0)
+        .unwrap_or_else(|| {
+            comment
+                .ancestors()
+                .filter_map(ElementRef::wrap)
+                .filter(|ancestor| {
+                    matches!(
+                        ancestor.value().name(),
+                        "shreddit-comment" | "div" | "article" | "section"
+                    ) && (ancestor.value().name() == "shreddit-comment"
+                        || ancestor.value().attr("data-testid") == Some("comment"))
+                })
+                .count()
+        })
+}
+
+fn nearest_reddit_comment<'a>(
+    element: ElementRef<'a>,
+    comment_wrapper_selector: &Selector,
+) -> Option<ElementRef<'a>> {
+    element.ancestors().find_map(|ancestor| {
+        ElementRef::wrap(ancestor).filter(|ancestor| comment_wrapper_selector.matches(ancestor))
+    })
 }
 
 fn hacker_news_listing_candidate(doc: &ParsedDocument) -> Result<Option<String>, ChidoriError> {

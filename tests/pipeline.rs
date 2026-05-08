@@ -562,6 +562,56 @@ fn hacker_news_item_pages_use_generic_extraction_for_discussions() {
 }
 
 #[test]
+fn reddit_fallback_comments_keep_nested_replies_subordinate_and_unique() {
+    let html = r#"
+    <html><body>
+      <main>
+        <article data-testid="post-container">
+          <h1>Fallback Reddit Thread</h1>
+          <div data-testid="post-content"><p>Post body remains readable.</p></div>
+        </article>
+        <section aria-label="Comments">
+          <div data-testid="comment">
+            <header><a href="/user/parentuser/">u/parentuser</a></header>
+            <span score="13 points"></span>
+            <time>3 hours ago</time>
+            <div class="md"><p>Parent comment should not absorb the reply.</p></div>
+            <div class="replies">
+              <div data-testid="comment">
+                <header><a href="/user/replyuser/">u/replyuser</a></header>
+                <span score="5 points"></span>
+                <time>2 hours ago</time>
+                <div class="md"><p>Nested fallback reply appears once.</p></div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </body></html>"#;
+    let doc = ParsedDocument::parse(
+        html,
+        Url::parse("https://www.reddit.com/r/rust/comments/abc123/example_post/").unwrap(),
+    );
+    let main = extract_main_html(&doc).unwrap();
+    let cleaned = clean_html(&main, &CleanOptions { no_images: false });
+    let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("u/parentuser"));
+    assert!(markdown.contains("13 points · 3 hours ago"));
+    assert!(markdown.contains("Parent comment should not absorb the reply."));
+    assert!(markdown.contains("> u/replyuser"));
+    assert!(markdown.contains("> 5 points · 2 hours ago"));
+    assert!(markdown.contains("> Nested fallback reply appears once."));
+    assert_eq!(markdown.matches("u/replyuser").count(), 1);
+    assert_eq!(
+        markdown
+            .matches("Nested fallback reply appears once.")
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn falls_back_to_plain_structured_body_when_body_only_contains_schema_script() {
     let html = r#"
     <html>
