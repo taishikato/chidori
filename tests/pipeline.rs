@@ -80,6 +80,29 @@ fn extracts_extended_metadata_from_social_and_structured_sources() {
 }
 
 #[test]
+fn extracts_schema_org_data_from_type_with_parameters() {
+    let html = r#"<!doctype html>
+    <html lang="en">
+      <head>
+        <title>Fallback Title</title>
+        <script type="application/ld+json; charset=utf-8">
+          {
+            "@context": "https://schema.org",
+            "@type": "Article",
+            "headline": "Parameterized JSON-LD Title"
+          }
+        </script>
+      </head>
+      <body><article><p>Hello world.</p></article></body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.title, "Parameterized JSON-LD Title");
+    assert!(metadata.schema_org_data.is_some());
+}
+
+#[test]
 fn extracts_author_from_scalar_structured_source() {
     let html = r#"<!doctype html>
     <html lang="en">

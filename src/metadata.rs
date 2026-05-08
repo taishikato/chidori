@@ -72,10 +72,15 @@ pub fn structured_content_text(doc: &ParsedDocument) -> Option<String> {
 }
 
 pub fn extract_schema_org_data(doc: &ParsedDocument) -> Option<Value> {
-    let selector = Selector::parse(r#"script[type="application/ld+json"]"#).ok()?;
+    let selector = Selector::parse("script").ok()?;
     let values = doc
         .dom
         .select(&selector)
+        .filter(|node| {
+            node.value()
+                .attr("type")
+                .is_some_and(is_json_ld_script_type)
+        })
         .filter_map(|node| {
             let text = node.text().collect::<Vec<_>>().join("");
             let text = text.trim();
@@ -91,6 +96,13 @@ pub fn extract_schema_org_data(doc: &ParsedDocument) -> Option<Value> {
         1 => values.into_iter().next(),
         _ => Some(Value::Array(values)),
     }
+}
+
+fn is_json_ld_script_type(value: &str) -> bool {
+    value
+        .split(';')
+        .next()
+        .is_some_and(|mime| mime.trim().eq_ignore_ascii_case("application/ld+json"))
 }
 
 fn title(doc: &ParsedDocument) -> Option<String> {
