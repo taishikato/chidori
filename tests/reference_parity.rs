@@ -235,10 +235,24 @@ fn matches_reference_pages_for_representative_urls() {
                 "Home",
                 "Sign in",
                 "Subscribe",
+                "subscribe",
                 "Share",
+                "Save",
+                "Video player placeholder",
                 "Download app",
                 "Promoted video",
                 "Related video",
+                "Related Video That Should Not Win",
+                "Inline Recommendation That Should Not Win",
+                "Wrong Channel",
+                "Inline Wrong Channel",
+                "999K views",
+                "456K views",
+                "123K views",
+                "Related description should not appear",
+                "Related transcript should not appear",
+                "Inline recommendation description should not appear",
+                "Inline transcript should not appear",
             ],
         },
     ];
@@ -248,6 +262,50 @@ fn matches_reference_pages_for_representative_urls() {
         assert_contains_all(&markdown, case.expected);
         assert_contains_none(&markdown, case.rejected);
     }
+}
+
+#[test]
+fn video_watch_reference_uses_only_primary_watch_content() {
+    let markdown = fixture_to_markdown(
+        "domain--video-watch-page.html",
+        "https://www.youtube.com/watch?v=abc123xyz",
+    );
+
+    assert_contains_all(
+        &markdown,
+        &[
+            "# Building a Parser Garden",
+            "Example Channel",
+            "May 8, 2026",
+            "This walkthrough shows how small extraction fixtures make CLI output predictable.",
+            "First we save a representative watch page.",
+        ],
+    );
+    assert_contains_none(
+        &markdown,
+        &[
+            "Related Video That Should Not Win",
+            "Inline Recommendation That Should Not Win",
+            "Wrong Channel",
+            "Inline Wrong Channel",
+            "999K views",
+            "456K views",
+            "123K views",
+            "Related description should not appear",
+            "Related transcript should not appear",
+            "Inline recommendation description should not appear",
+            "Inline transcript should not appear",
+            "Video player placeholder",
+            "Save",
+            "subscribe",
+        ],
+    );
+    assert_occurs_once(&markdown, "Example Channel");
+    assert_occurs_once(
+        &markdown,
+        "This walkthrough shows how small extraction fixtures make CLI output predictable.",
+    );
+    assert_occurs_once(&markdown, "First we save a representative watch page.");
 }
 
 #[test]

@@ -150,26 +150,40 @@ fn youtube_watch_candidate(doc: &ParsedDocument) -> Result<Option<String>, Chido
         return Ok(None);
     }
 
-    let title_selector = Selector::parse("#watch-content h1, h1")
-        .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
-    let channel_selector = Selector::parse(
-        "#watch-content .channel-name, ytd-channel-name a, #channel-name a, a[href^=\"/@\"]",
-    )
-    .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
-    let date_selector = Selector::parse(
-        "#watch-content #info span, #info-strings yt-formatted-string, #date yt-formatted-string, #date-text",
-    )
-    .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
-    let description_selector = Selector::parse(
-        "#watch-content #description, #description-inline-expander, ytd-text-inline-expander, [itemprop=\"description\"]",
-    )
-    .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
-    let transcript_selector =
-        Selector::parse("#watch-content #transcript, ytd-transcript-renderer, .transcript")
+    let watch_selectors = [
+        Selector::parse("#watch-content")
+            .map_err(|error| ChidoriError::Unknown(error.to_string()))?,
+        Selector::parse("#primary-inner")
+            .map_err(|error| ChidoriError::Unknown(error.to_string()))?,
+        Selector::parse("ytd-watch-flexy #primary")
+            .map_err(|error| ChidoriError::Unknown(error.to_string()))?,
+        Selector::parse("main #primary")
+            .map_err(|error| ChidoriError::Unknown(error.to_string()))?,
+    ];
+    let title_selector =
+        Selector::parse("h1").map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let channel_selector =
+        Selector::parse(".channel-name, ytd-channel-name a, #channel-name a, a[href^=\"/@\"]")
             .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let date_selector = Selector::parse(
+        "[itemprop=\"datePublished\"], time, #info-strings yt-formatted-string, #date yt-formatted-string, #date-text, #info .date, #info .date-text",
+    )
+        .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let description_selector = Selector::parse(
+        "#description, #description-inline-expander, ytd-text-inline-expander, [itemprop=\"description\"]",
+    )
+    .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let transcript_selector = Selector::parse("#transcript, ytd-transcript-renderer, .transcript")
+        .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
 
-    let Some(title) = doc
-        .dom
+    let Some(watch) = watch_selectors
+        .iter()
+        .find_map(|selector| doc.dom.select(selector).next())
+    else {
+        return Ok(None);
+    };
+
+    let Some(title) = watch
         .select(&title_selector)
         .map(element_text)
         .find(|title| !title.is_empty())
@@ -183,16 +197,14 @@ fn youtube_watch_candidate(doc: &ParsedDocument) -> Result<Option<String>, Chido
     output.push_str("</h1>");
 
     let mut meta = Vec::new();
-    if let Some(channel) = doc
-        .dom
+    if let Some(channel) = watch
         .select(&channel_selector)
         .map(element_text)
         .find(|channel| !channel.is_empty())
     {
         meta.push(channel);
     }
-    if let Some(date) = doc
-        .dom
+    if let Some(date) = watch
         .select(&date_selector)
         .map(element_text)
         .find(|date| !date.is_empty())
@@ -201,16 +213,14 @@ fn youtube_watch_candidate(doc: &ParsedDocument) -> Result<Option<String>, Chido
     }
     push_meta_paragraph(&mut output, &meta);
 
-    if let Some(description) = doc
-        .dom
+    if let Some(description) = watch
         .select(&description_selector)
         .find(|description| !element_text(*description).is_empty())
     {
         output.push_str(&description.inner_html());
     }
 
-    if let Some(transcript) = doc
-        .dom
+    if let Some(transcript) = watch
         .select(&transcript_selector)
         .find(|transcript| !element_text(*transcript).is_empty())
     {
