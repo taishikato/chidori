@@ -44,6 +44,42 @@ fn extracts_basic_metadata() {
 }
 
 #[test]
+fn extracts_extended_metadata_from_social_and_structured_sources() {
+    let html = r#"<!doctype html>
+    <html lang="en">
+      <head>
+        <title>Fallback Title</title>
+        <link rel="icon" href="/favicon.ico">
+        <meta property="og:title" content="Social Title">
+        <meta name="twitter:description" content="Social description">
+        <meta property="og:image" content="https://cdn.example.com/cover.png">
+        <script type="application/ld+json">
+          {
+            "@context": "https://schema.org",
+            "@type": "Article",
+            "author": { "name": "Grace Hopper" },
+            "datePublished": "2026-05-07T12:00:00Z",
+            "publisher": { "name": "Structured Site" }
+          }
+        </script>
+      </head>
+      <body><article><p>Hello world.</p></article></body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.title, "Social Title");
+    assert_eq!(metadata.description, "Social description");
+    assert_eq!(metadata.author, "Grace Hopper");
+    assert_eq!(metadata.published, "2026-05-07T12:00:00Z");
+    assert_eq!(metadata.site, "Structured Site");
+    assert_eq!(metadata.domain, "example.com");
+    assert_eq!(metadata.favicon, "https://example.com/favicon.ico");
+    assert_eq!(metadata.image, "https://cdn.example.com/cover.png");
+    assert!(metadata.schema_org_data.is_some());
+}
+
+#[test]
 fn extracts_article_over_navigation() {
     let html = r#"
     <html><body>
@@ -263,6 +299,38 @@ fn retries_short_article_placeholder_when_body_has_structured_content() {
     assert!(main.contains("Runtime Rendered Documentation"));
     assert!(main.contains("Article shell has teaser words"));
     assert!(main.contains("Agents need this text"));
+}
+
+#[test]
+fn uses_structured_body_when_it_is_more_complete_than_visible_shell() {
+    let structured_text = "This is the full article body with enough words to beat the short visible shell. It includes the important details that agents need, and it should become the extracted content when the page markup only exposes a tiny placeholder.";
+    let html = format!(
+        r#"
+    <html>
+      <head>
+        <script type="application/ld+json">
+          {{
+            "@context": "https://schema.org",
+            "@type": "Article",
+            "articleBody": "{structured_text}"
+          }}
+        </script>
+      </head>
+      <body>
+        <article><p>Short shell.</p></article>
+        <section id="full-story">
+          <p>This is the <strong>full article body</strong> with enough words to beat the short visible shell. It includes the important details that agents need, and it should become the extracted content when the page markup only exposes a tiny placeholder.</p>
+        </section>
+      </body>
+    </html>"#
+    );
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("full article body"));
+    assert!(main.contains("<strong>full article body</strong>"));
+    assert!(!main.contains("Short shell"));
 }
 
 #[test]
