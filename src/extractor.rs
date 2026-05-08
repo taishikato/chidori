@@ -1,4 +1,5 @@
 use crate::{document::ParsedDocument, error::ChidoriError};
+use html_escape::encode_text;
 use scraper::{ElementRef, Selector};
 
 const PRIMARY_ENTRY_SELECTORS: &[&str] = &[
@@ -73,22 +74,98 @@ pub fn extract_main_html(doc: &ParsedDocument) -> Result<String, ChidoriError> {
         best_candidate = best_candidate_for_selectors(doc, BODY_FALLBACK_SELECTORS, &selectors)?;
     }
 
-    if let Some(candidate) = best_candidate
-        .as_ref()
-        .filter(|candidate| candidate.word_count < LOW_WORD_COUNT_RETRY_THRESHOLD)
-    {
-        if let Some(body_candidate) =
-            best_candidate_for_selectors(doc, BODY_FALLBACK_SELECTORS, &selectors)?
+    let mut used_structured_content = false;
+    if let Some(candidate) = best_candidate.as_ref() {
+        if let Some(html) = structured_content_candidate(doc, candidate.word_count)? {
+            used_structured_content = true;
+            best_candidate = Some(Candidate {
+                score: candidate.score,
+                selector_index: candidate.selector_index,
+                word_count: text_word_count(&html),
+                content_block_count: candidate.content_block_count,
+                html,
+            });
+        }
+    }
+
+    if !used_structured_content {
+        if let Some(candidate) = best_candidate
+            .as_ref()
+            .filter(|candidate| candidate.word_count < LOW_WORD_COUNT_RETRY_THRESHOLD)
         {
-            if should_retry_with_body(candidate, &body_candidate) {
-                best_candidate = Some(body_candidate);
+            if let Some(body_candidate) =
+                best_candidate_for_selectors(doc, BODY_FALLBACK_SELECTORS, &selectors)?
+            {
+                if should_retry_with_body(candidate, &body_candidate) {
+                    best_candidate = Some(body_candidate);
+                }
             }
         }
     }
 
-    best_candidate
-        .map(|candidate| candidate.html)
-        .ok_or(ChidoriError::ExtractionFailed)
+    if let Some(candidate) = best_candidate {
+        Ok(candidate.html)
+    } else if let Some(html) = structured_content_candidate(doc, 0)? {
+        Ok(html)
+    } else {
+        Err(ChidoriError::ExtractionFailed)
+    }
+}
+
+fn structured_content_candidate(
+    doc: &ParsedDocument,
+    current_word_count: usize,
+) -> Result<Option<String>, ChidoriError> {
+    let Some(text) = crate::metadata::structured_content_text(doc) else {
+        return Ok(None);
+    };
+    let structured_word_count = text.split_whitespace().count();
+    if structured_word_count == 0 || structured_word_count * 2 <= current_word_count * 3 {
+        return Ok(None);
+    }
+
+    if let Some(html) = smallest_element_containing_text(doc, &text)? {
+        return Ok(Some(html));
+    }
+
+    Ok(Some(encode_text(&text).to_string()))
+}
+
+fn smallest_element_containing_text(
+    doc: &ParsedDocument,
+    target_text: &str,
+) -> Result<Option<String>, ChidoriError> {
+    let selector =
+        Selector::parse("body *").map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let target = normalize_text(target_text);
+
+    Ok(doc
+        .dom
+        .select(&selector)
+        .filter(|element| !matches!(element.value().name(), "script" | "style" | "noscript"))
+        .filter_map(|element| {
+            let text = element.text().collect::<Vec<_>>().join(" ");
+            let normalized = normalize_text(&text);
+            normalized
+                .contains(&target)
+                .then(|| (normalized.len(), element.html()))
+        })
+        .min_by_key(|(len, _html)| *len)
+        .map(|(_len, html)| html))
+}
+
+fn normalize_text(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn text_word_count(html: &str) -> usize {
+    scraper::Html::parse_fragment(html)
+        .root_element()
+        .text()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .split_whitespace()
+        .count()
 }
 
 fn is_protected_article_candidate(candidate: &Candidate) -> bool {
@@ -116,7 +193,7 @@ fn score_element(
     element: ElementRef<'_>,
     selectors: &ScoringSelectors,
 ) -> (isize, usize, usize, usize) {
-    let text = element.text().collect::<Vec<_>>().join(" ");
+    let text = text_without_invisible_nodes(&element.html());
     let word_count = text.split_whitespace().count();
     let paragraph_count = element.select(&selectors.paragraphs).count();
     let content_block_count = element.select(&selectors.body_content_blocks).count();
@@ -172,6 +249,17 @@ fn score_element(
     score = ((score as f64) * (1.0 - link_density)).round() as isize;
 
     (score, word_count, paragraph_count, content_block_count)
+}
+
+fn text_without_invisible_nodes(html: &str) -> String {
+    let cleaned =
+        crate::cleaner::clean_html(html, &crate::cleaner::CleanOptions { no_images: false });
+
+    scraper::Html::parse_fragment(&cleaned)
+        .root_element()
+        .text()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn best_candidate_for_selectors(

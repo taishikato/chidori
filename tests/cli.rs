@@ -130,6 +130,54 @@ async fn json_outputs_metadata_and_markdown() {
 }
 
 #[tokio::test]
+async fn json_outputs_extended_metadata() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/metadata"))
+        .respond_with(html_response(
+            r#"
+            <html lang="en">
+              <head>
+                <title>Fallback</title>
+                <link rel="icon" href="/favicon.ico">
+                <meta property="og:title" content="Structured JSON Article">
+                <meta property="og:image" content="https://cdn.example.com/cover.png">
+                <script type="application/ld+json">
+                  {
+                    "@context": "https://schema.org",
+                    "@type": "Article",
+                    "author": { "name": "Grace Hopper" },
+                    "publisher": { "name": "Example Journal" }
+                  }
+                </script>
+              </head>
+              <body><article><h1>Structured JSON Article</h1><p>Machine readable body.</p></article></body>
+            </html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/metadata", server.uri()))
+        .arg("--json")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["title"], "Structured JSON Article");
+    assert_eq!(json["author"], "Grace Hopper");
+    assert_eq!(json["site"], "Example Journal");
+    assert_eq!(json["domain"], "127.0.0.1");
+    assert!(json["favicon"].as_str().unwrap().ends_with("/favicon.ico"));
+    assert_eq!(json["image"], "https://cdn.example.com/cover.png");
+    assert!(json["schemaOrgData"].is_object());
+}
+
+#[tokio::test]
 async fn output_writes_markdown_to_file_without_stdout() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
