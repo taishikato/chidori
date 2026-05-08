@@ -33,6 +33,9 @@ pub fn extract_raw_markdown(html: &str) -> Option<String> {
         &remove_raw_tag(&remove_raw_tag(body, "script"), "style"),
         "noscript",
     );
+    if has_visible_markup(&without_scripts) {
+        return None;
+    }
     let text = strip_tags(&without_scripts);
     let markdown = html_escape::decode_html_entities(&text)
         .trim()
@@ -42,6 +45,22 @@ pub fn extract_raw_markdown(html: &str) -> Option<String> {
         return None;
     }
     Some(markdown.replace("\n\n\n", "\n\n").trim().to_string())
+}
+
+fn has_visible_markup(html: &str) -> bool {
+    let mut rest = html;
+    while let Some(index) = rest.find('<') {
+        let candidate = &rest[index..];
+        let Some(end) = candidate.find('>') else {
+            return false;
+        };
+        let tag = &candidate[..=end];
+        if !tag.starts_with("<!--") && !tag.starts_with("<!") && !tag.starts_with("<?") {
+            return true;
+        }
+        rest = &candidate[end + 1..];
+    }
+    false
 }
 
 fn body_inner_html(html: &str) -> Option<&str> {
@@ -512,19 +531,94 @@ fn sanitize_language(language: &str) -> Option<String> {
 }
 
 fn attr_value(opening_tag: &str, name: &str) -> Option<String> {
-    for quote in ['"', '\''] {
-        let pattern = format!("{name}={quote}");
-        let Some(start) = opening_tag.find(&pattern) else {
-            continue;
-        };
-        let start = start + pattern.len();
-        let value = &opening_tag[start..];
-        let Some(end) = value.find(quote) else {
-            continue;
-        };
-        return Some(html_escape::decode_html_entities(&value[..end]).to_string());
+    opening_attribute_values(opening_tag, name)
+        .next()
+        .map(|value| html_escape::decode_html_entities(value).to_string())
+}
+
+fn opening_attribute_values<'a>(
+    opening_tag: &'a str,
+    expected: &'a str,
+) -> impl Iterator<Item = &'a str> + 'a {
+    OpeningAttributes::new(opening_tag).filter_map(move |(name, value)| {
+        name.eq_ignore_ascii_case(expected)
+            .then_some(value)
+            .flatten()
+    })
+}
+
+struct OpeningAttributes<'a> {
+    input: &'a str,
+}
+
+impl<'a> OpeningAttributes<'a> {
+    fn new(opening_tag: &'a str) -> Self {
+        let input = opening_tag
+            .strip_prefix('<')
+            .and_then(|value| value.strip_suffix('>'))
+            .unwrap_or(opening_tag);
+        let input = input.trim_start().trim_end_matches('/').trim_end();
+        let name_end = input
+            .find(|ch: char| ch.is_ascii_whitespace() || ch == '/')
+            .unwrap_or(input.len());
+
+        Self {
+            input: &input[name_end..],
+        }
     }
-    None
+}
+
+impl<'a> Iterator for OpeningAttributes<'a> {
+    type Item = (&'a str, Option<&'a str>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.input = self.input.trim_start();
+        if self.input.is_empty() || self.input.starts_with('/') {
+            return None;
+        }
+
+        let name_end = self
+            .input
+            .find(|ch: char| ch.is_ascii_whitespace() || ch == '=' || ch == '/')
+            .unwrap_or(self.input.len());
+        if name_end == 0 {
+            self.input = &self.input[1..];
+            return self.next();
+        }
+
+        let name = &self.input[..name_end];
+        let mut rest = self.input[name_end..].trim_start();
+        if !rest.starts_with('=') {
+            self.input = rest;
+            return Some((name, None));
+        }
+
+        rest = rest[1..].trim_start();
+        if rest.is_empty() {
+            self.input = rest;
+            return Some((name, Some("")));
+        }
+
+        if let Some(quote) = rest
+            .chars()
+            .next()
+            .filter(|quote| matches!(quote, '"' | '\''))
+        {
+            let value = &rest[quote.len_utf8()..];
+            if let Some(end) = value.find(quote) {
+                self.input = &value[end + quote.len_utf8()..];
+                return Some((name, Some(&value[..end])));
+            }
+            self.input = "";
+            return Some((name, Some(value)));
+        }
+
+        let value_end = rest
+            .find(|ch: char| ch.is_ascii_whitespace() || ch == '/')
+            .unwrap_or(rest.len());
+        self.input = &rest[value_end..];
+        Some((name, Some(&rest[..value_end])))
+    }
 }
 
 fn annotation_latex(html: &str) -> Option<String> {

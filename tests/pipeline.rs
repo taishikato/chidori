@@ -2,7 +2,7 @@ use chidori::{
     cleaner::{clean_html, CleanOptions},
     document::ParsedDocument,
     extractor::extract_main_html,
-    markdown::{html_to_markdown, MarkdownOptions},
+    markdown::{extract_raw_markdown, html_to_markdown, MarkdownOptions},
     metadata::{extract_metadata, Metadata},
     output::{render_output, RenderMode},
 };
@@ -534,6 +534,34 @@ fn extracts_hacker_news_listing_items_as_readable_content() {
 }
 
 #[test]
+fn hacker_news_item_pages_use_generic_extraction_for_discussions() {
+    let html = r#"
+    <html>
+      <body>
+        <table>
+          <tr class="athing" id="401">
+            <td class="title">
+              <span class="titleline"><a href="https://example.com/post">Launch notes</a></span>
+            </td>
+          </tr>
+          <tr><td class="subtext"><span class="score">123 points</span> | <a href="item?id=401">17 comments</a></td></tr>
+        </table>
+        <table class="comment-tree">
+          <tr class="athing comtr"><td class="comment">This discussion comment should be extracted.</td></tr>
+        </table>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(
+        html,
+        Url::parse("https://news.ycombinator.com/item?id=401").unwrap(),
+    );
+
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("This discussion comment should be extracted."));
+}
+
+#[test]
 fn falls_back_to_plain_structured_body_when_body_only_contains_schema_script() {
     let html = r#"
     <html>
@@ -657,6 +685,44 @@ fn converts_math_elements_to_markdown_delimiters() {
     assert!(markdown.contains("Inline energy uses $E=mc^2$ in prose."));
     assert!(markdown.contains("$$\n\\int_0^1 x\\,dx = \\frac{1}{2}\n$$"));
     assert!(!markdown.contains("<math"));
+}
+
+#[test]
+fn raw_markdown_detection_skips_normal_html_articles() {
+    let html = r#"
+    <html>
+      <body>
+        <article>
+          <h1>Markdown Examples in HTML</h1>
+          <p>This article talks about **bold syntax** and [links](https://example.com).</p>
+          <p>The HTML structure should still go through normal extraction.</p>
+        </article>
+      </body>
+    </html>"#;
+
+    assert!(extract_raw_markdown(html).is_none());
+}
+
+#[test]
+fn converts_special_elements_with_whitespace_around_attribute_equals() {
+    let html = r##"
+    <article>
+      <p>Inline acceleration uses <math data-latex = "a=b^2"></math> in prose.</p>
+      <div class = "callout" data-callout = "note">
+        <div class="callout-title-inner">Heads up</div>
+        <div class="callout-content"><p>Whitespace in attributes should be fine.</p></div>
+      </div>
+      <p>The parser keeps cited claims<sup id = "fnref-1"><a href="#fn-1">1</a></sup> readable.</p>
+      <section id = "footnotes"><ol><li id = "fn-1">Footnote text survives.</li></ol></section>
+    </article>"##;
+
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("Inline acceleration uses $a=b^2$ in prose."));
+    assert!(markdown.contains("> [!note] Heads up"));
+    assert!(markdown.contains("> Whitespace in attributes should be fine."));
+    assert!(markdown.contains("cited claims[^1] readable."));
+    assert!(markdown.contains("[^1]: Footnote text survives."));
 }
 
 #[test]

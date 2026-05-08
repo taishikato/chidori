@@ -117,7 +117,7 @@ pub fn extract_main_html(doc: &ParsedDocument) -> Result<String, ChidoriError> {
 }
 
 fn hacker_news_listing_candidate(doc: &ParsedDocument) -> Result<Option<String>, ChidoriError> {
-    if doc.url.host_str() != Some("news.ycombinator.com") {
+    if doc.url.host_str() != Some("news.ycombinator.com") || !is_hacker_news_listing_path(doc) {
         return Ok(None);
     }
 
@@ -219,6 +219,13 @@ fn hacker_news_listing_candidate(doc: &ParsedDocument) -> Result<Option<String>,
     } else {
         Ok(Some(output))
     }
+}
+
+fn is_hacker_news_listing_path(doc: &ParsedDocument) -> bool {
+    matches!(
+        doc.url.path(),
+        "/" | "/news" | "/newest" | "/front" | "/ask" | "/show" | "/jobs" | "/submitted"
+    )
 }
 
 fn comments_link(
