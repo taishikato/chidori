@@ -60,6 +60,10 @@ pub fn extract_main_html(doc: &ParsedDocument) -> Result<String, ChidoriError> {
         return Ok(html);
     }
 
+    if let Some(html) = reddit_discussion_candidate(doc)? {
+        return Ok(html);
+    }
+
     let selectors = ScoringSelectors {
         links: Selector::parse("a").map_err(|error| ChidoriError::Unknown(error.to_string()))?,
         paragraphs: Selector::parse("p")
@@ -114,6 +118,226 @@ pub fn extract_main_html(doc: &ParsedDocument) -> Result<String, ChidoriError> {
     } else {
         Err(ChidoriError::ExtractionFailed)
     }
+}
+
+fn reddit_discussion_candidate(doc: &ParsedDocument) -> Result<Option<String>, ChidoriError> {
+    if !is_reddit_discussion_path(doc) {
+        return Ok(None);
+    }
+
+    let post_selector = Selector::parse(
+        "shreddit-post, article[data-testid=\"post-container\"], article#post, [data-testid=\"post-container\"]",
+    )
+    .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let title_selector = Selector::parse("h1, [slot=\"title\"]")
+        .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let body_selector =
+        Selector::parse("[slot=\"text-body\"], .md, [data-testid=\"post-content\"]")
+            .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let user_selector = Selector::parse("a[href*=\"/user/\"], a[href*=\"/u/\"]")
+        .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let score_selector =
+        Selector::parse("[score], [id*=\"score\"], faceplate-number, [slot=\"credit-bar\"] span")
+            .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let time_selector =
+        Selector::parse("time").map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let comment_selector = Selector::parse("shreddit-comment, [data-testid=\"comment\"]")
+        .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let comment_body_selector =
+        Selector::parse("[slot=\"comment\"], [data-testid=\"comment\"] .md")
+            .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+
+    let Some(post) = doc.dom.select(&post_selector).next() else {
+        return Ok(None);
+    };
+
+    let title = post
+        .select(&title_selector)
+        .next()
+        .map(element_text)
+        .filter(|title| !title.is_empty());
+    let Some(title) = title else {
+        return Ok(None);
+    };
+
+    let mut output = String::from("<article class=\"chidori-reddit-discussion\">");
+    output.push_str("<h1>");
+    output.push_str(&encode_text(&title));
+    output.push_str("</h1>");
+
+    let mut post_meta = Vec::new();
+    if let Some(author) = post_author(post, &user_selector) {
+        post_meta.push(author);
+    }
+    if let Some(score) = post_score(post, &score_selector) {
+        post_meta.push(score);
+    }
+    if let Some(date) = post
+        .select(&time_selector)
+        .next()
+        .map(element_text)
+        .filter(|date| !date.is_empty())
+    {
+        post_meta.push(date);
+    }
+    push_meta_paragraph(&mut output, &post_meta);
+
+    if let Some(body) = post.select(&body_selector).next() {
+        output.push_str(&body.inner_html());
+    }
+
+    let comments: Vec<_> = doc.dom.select(&comment_selector).collect();
+    if !comments.is_empty() {
+        output.push_str("<h2>Comments</h2>");
+        for comment in comments
+            .iter()
+            .copied()
+            .filter(|comment| comment_depth(*comment) == 0)
+        {
+            push_reddit_comment(
+                &mut output,
+                comment,
+                &comment_selector,
+                &comment_body_selector,
+                &user_selector,
+                &time_selector,
+                0,
+            );
+        }
+    }
+
+    output.push_str("</article>");
+    Ok(Some(output))
+}
+
+fn is_reddit_discussion_path(doc: &ParsedDocument) -> bool {
+    let Some(host) = doc.url.host_str() else {
+        return false;
+    };
+
+    (host == "reddit.com" || host.ends_with(".reddit.com")) && doc.url.path().contains("/comments/")
+}
+
+fn post_author(post: ElementRef<'_>, user_selector: &Selector) -> Option<String> {
+    post.value()
+        .attr("author")
+        .map(|author| format!("u/{author}"))
+        .or_else(|| post.select(user_selector).next().map(element_text))
+        .filter(|author| !author.is_empty())
+}
+
+fn post_score(post: ElementRef<'_>, score_selector: &Selector) -> Option<String> {
+    post.value()
+        .attr("score")
+        .map(ToString::to_string)
+        .or_else(|| {
+            post.select(score_selector).find_map(|element| {
+                element
+                    .value()
+                    .attr("score")
+                    .map(ToString::to_string)
+                    .or_else(|| {
+                        let text = element_text(element);
+                        (!text.is_empty()).then_some(text)
+                    })
+            })
+        })
+}
+
+fn push_meta_paragraph(output: &mut String, parts: &[String]) {
+    if parts.is_empty() {
+        return;
+    }
+
+    output.push_str("<p><small>");
+    output.push_str(&encode_text(&parts.join(" · ")));
+    output.push_str("</small></p>");
+}
+
+fn push_reddit_comment(
+    output: &mut String,
+    comment: ElementRef<'_>,
+    comment_selector: &Selector,
+    body_selector: &Selector,
+    user_selector: &Selector,
+    time_selector: &Selector,
+    depth: usize,
+) {
+    if depth > 0 {
+        output.push_str("<blockquote>");
+    } else {
+        output.push_str("<section class=\"chidori-reddit-comment\">");
+    }
+
+    let mut meta = Vec::new();
+    if let Some(author) = comment_author(comment, user_selector) {
+        output.push_str("<p>");
+        output.push_str(&encode_text(&author));
+        output.push_str("</p>");
+    }
+    if let Some(score) = comment_score(comment) {
+        meta.push(score);
+    }
+    if let Some(date) = comment
+        .select(time_selector)
+        .next()
+        .map(element_text)
+        .filter(|date| !date.is_empty())
+    {
+        meta.push(date);
+    }
+    push_meta_paragraph(output, &meta);
+
+    if let Some(body) = comment.select(body_selector).next() {
+        output.push_str(&body.inner_html());
+    }
+
+    let child_depth = depth + 1;
+    for reply in comment
+        .select(comment_selector)
+        .filter(|reply| comment_depth(*reply) == child_depth)
+    {
+        push_reddit_comment(
+            output,
+            reply,
+            comment_selector,
+            body_selector,
+            user_selector,
+            time_selector,
+            child_depth,
+        );
+    }
+
+    if depth > 0 {
+        output.push_str("</blockquote>");
+    } else {
+        output.push_str("</section>");
+    }
+}
+
+fn comment_author(comment: ElementRef<'_>, user_selector: &Selector) -> Option<String> {
+    comment
+        .value()
+        .attr("author")
+        .map(|author| format!("u/{author}"))
+        .or_else(|| comment.select(user_selector).next().map(element_text))
+        .filter(|author| !author.is_empty())
+}
+
+fn comment_score(comment: ElementRef<'_>) -> Option<String> {
+    comment
+        .value()
+        .attr("score")
+        .map(ToString::to_string)
+        .filter(|score| !score.is_empty())
+}
+
+fn comment_depth(comment: ElementRef<'_>) -> usize {
+    comment
+        .value()
+        .attr("depth")
+        .and_then(|depth| depth.parse().ok())
+        .unwrap_or(0)
 }
 
 fn hacker_news_listing_candidate(doc: &ParsedDocument) -> Result<Option<String>, ChidoriError> {

@@ -155,6 +155,32 @@ fn matches_reference_pages_for_representative_urls() {
             ],
             rejected: &["past", "More"],
         },
+        Case {
+            fixture: "domain--reddit-discussion.html",
+            url: "https://www.reddit.com/r/rust/comments/abc123/example_post/",
+            expected: &[
+                "Rust ownership finally clicked for me",
+                "u/ferrisbuilder",
+                "324 upvotes",
+                "I kept trying to memorize borrow checker errors",
+                "u/systemsreader",
+                "91 points · 2 days ago",
+                "This is the moment Rust starts feeling like design feedback",
+                "> u/borrowedbits",
+                "> 28 points · 2 days ago",
+                "> That phrasing helped me too",
+                "u/macromender",
+                "47 points · 2 days ago",
+                "Small parser projects are perfect",
+            ],
+            rejected: &[
+                "Log In",
+                "Sign Up",
+                "About Community",
+                "Sponsored course",
+                "Reddit app download",
+            ],
+        },
     ];
 
     for case in cases {

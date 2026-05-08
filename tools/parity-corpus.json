@@ -184,5 +184,36 @@
       "Maybe there's a pattern here?",
       "The real data wall"
     ]
+  },
+  {
+    "id": "reddit-discussion",
+    "fixture": "tests/fixtures/reference/domain--reddit-discussion.html",
+    "sourceUrl": "https://www.reddit.com/r/rust/comments/abc123/example_post/",
+    "category": "specialized-content-extraction",
+    "reference": "accepted-reference-output",
+    "capability": "Reddit post and comment extraction without page chrome",
+    "status": "implemented",
+    "expected": [
+      "Rust ownership finally clicked for me",
+      "u/ferrisbuilder",
+      "324 upvotes",
+      "I kept trying to memorize borrow checker errors",
+      "u/systemsreader",
+      "91 points · 2 days ago",
+      "This is the moment Rust starts feeling like design feedback",
+      "> u/borrowedbits",
+      "> 28 points · 2 days ago",
+      "> That phrasing helped me too",
+      "u/macromender",
+      "47 points · 2 days ago",
+      "Small parser projects are perfect"
+    ],
+    "rejected": [
+      "Log In",
+      "Sign Up",
+      "About Community",
+      "Sponsored course",
+      "Reddit app download"
+    ]
   }
 ]
