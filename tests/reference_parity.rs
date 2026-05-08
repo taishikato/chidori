@@ -7,7 +7,7 @@ use chidori::{
 use url::Url;
 
 fn fixture_to_markdown(fixture: &str, url: &str) -> String {
-    let html = std::fs::read_to_string(format!("tests/fixtures/defuddle/{fixture}")).unwrap();
+    let html = std::fs::read_to_string(format!("tests/fixtures/reference/{fixture}")).unwrap();
     let doc = ParsedDocument::parse(html, Url::parse(url).unwrap());
     let main = extract_main_html(&doc).unwrap();
     let cleaned = clean_html(&main, &CleanOptions { no_images: false });
@@ -34,7 +34,7 @@ fn assert_contains_none(markdown: &str, snippets: &[&str]) {
 }
 
 #[test]
-fn matches_defuddle_reference_pages_for_representative_urls() {
+fn matches_reference_pages_for_representative_urls() {
     struct Case<'a> {
         fixture: &'a str,
         url: &'a str,
@@ -85,6 +85,64 @@ fn matches_defuddle_reference_pages_for_representative_urls() {
             ],
             rejected: &["Related posts", "brief summary of another post"],
         },
+        Case {
+            fixture: "elements--javascript-links.html",
+            url: "https://example.com/javascript-links",
+            expected: &[
+                "This has a simple js link in a sentence.",
+                "A **bold js link** should keep its inner HTML.",
+                "[Example](https://example.com)",
+            ],
+            rejected: &["javascript:void", "javascript:alert"],
+        },
+        Case {
+            fixture: "hidden--visibility.html",
+            url: "https://example.com/visibility-hidden",
+            expected: &[
+                "## Foo",
+                "Tempor incididunt ut labore et dolore magna aliqua.",
+                "Duis aute irure dolor in reprehenderit in voluptate velit esse",
+            ],
+            rejected: &[
+                "Lorem ipsum dolor sit amet, consectetur adipisicing elit",
+                "Iframe fallback test",
+                "foo.swf",
+            ],
+        },
+        Case {
+            fixture: "content-patterns--table-of-contents.html",
+            url: "https://www.example.org/install-guide/",
+            expected: &[
+                "# Installation Guide",
+                "The system is installed as the sole operating system",
+                "```",
+                "sha256sum -c --ignore-missing sha256sums.txt",
+            ],
+            rejected: &[
+                "[1. Start Here](#1-start-here)",
+                "[Acquire the image](#acquire-the-image)",
+            ],
+        },
+        Case {
+            fixture: "content-patterns--leading-breadcrumb.html",
+            url: "https://example.com/newsletter-post",
+            expected: &[
+                "Not a shadowing day or research interview",
+                "## Why this industry?",
+                "## Getting the job",
+            ],
+            rejected: &["[Home](/)", "[Posts](/archive)"],
+        },
+        Case {
+            fixture: "content-patterns--trailing-related-posts.html",
+            url: "https://example.com/coffee-cooling",
+            expected: &[
+                "# How Coffee Cools",
+                "Coffee cools following Newton's law of cooling",
+                "Most models fit two exponential decay terms",
+            ],
+            rejected: &["Maybe there's a pattern here?", "The real data wall"],
+        },
     ];
 
     for case in cases {
@@ -95,7 +153,7 @@ fn matches_defuddle_reference_pages_for_representative_urls() {
 }
 
 #[test]
-fn matches_defuddle_rehype_pretty_copy_code_block_output() {
+fn matches_reference_rehype_pretty_copy_code_block_output() {
     let markdown = fixture_to_markdown(
         "codeblocks--rehype-pretty-copy.html",
         "https://example.com/weekly-project-review",

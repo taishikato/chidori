@@ -214,7 +214,7 @@ fn extracts_article_over_navigation() {
 }
 
 #[test]
-fn defuddle_priority_selectors_can_beat_larger_generic_main() {
+fn reference_priority_selectors_can_beat_larger_generic_main() {
     let focused_body = "Focused content wins through selector priority. ".repeat(10);
     let html = format!(
         r#"
@@ -594,6 +594,146 @@ fn removes_nested_noise_tags() {
     assert!(!cleaned.contains("outer"));
     assert!(!cleaned.contains("</aside>"));
     assert!(!cleaned.contains("</ASIDE>"));
+}
+
+#[test]
+fn unwraps_javascript_links_without_losing_inner_content() {
+    let html = r#"
+    <article>
+      <p>This has a <a href="javascript:void(0)">simple js link</a> in a sentence.</p>
+      <p>A <a href="javascript:void(0)"><strong>bold js link</strong></a> should keep formatting.</p>
+      <p>Normal <a href="https://example.com">links</a> should stay linked.</p>
+    </article>"#;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("This has a simple js link in a sentence."));
+    assert!(markdown.contains("A **bold js link** should keep formatting."));
+    assert!(markdown.contains("[links](https://example.com)"));
+    assert!(!markdown.contains("javascript:"));
+}
+
+#[test]
+fn removes_hidden_and_embedded_noise_elements() {
+    let html = r#"
+    <article>
+      <h1>Visible article</h1>
+      <div style="visibility: hidden;"><p>Hidden teaser should disappear.</p></div>
+      <div hidden><p>Hidden attribute should disappear.</p></div>
+      <p>Keep this visible paragraph.</p>
+      <iframe src="about:blank">Iframe fallback test</iframe>
+      <object data="foo.swf">Object fallback test</object>
+      <embed src="foo.swf">
+    </article>"#;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+
+    assert!(cleaned.contains("Keep this visible paragraph."));
+    assert!(!cleaned.contains("Hidden teaser"));
+    assert!(!cleaned.contains("Hidden attribute"));
+    assert!(!cleaned.contains("Iframe fallback"));
+    assert!(!cleaned.contains("Object fallback"));
+    assert!(!cleaned.contains("<embed"));
+}
+
+#[test]
+fn removes_breadcrumb_blocks_without_semantic_nav_tags() {
+    let html = r#"
+    <main>
+      <div data-block="nav">
+        <ul><li><a href="/">Home</a></li><li><a href="/archive">Posts</a></li></ul>
+      </div>
+      <p>Not a shadowing day or research interview — a real job.</p>
+    </main>"#;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+
+    assert!(cleaned.contains("Not a shadowing day"));
+    assert!(!cleaned.contains("Home"));
+    assert!(!cleaned.contains("Posts"));
+}
+
+#[test]
+fn removes_fragment_only_table_of_contents_lists() {
+    let html = r##"
+    <article>
+      <h1>Installation Guide</h1>
+      <ul>
+        <li><a href="#start">Start Here</a></li>
+        <li><a href="#configure">Configure</a></li>
+        <li><a href="#finish">Finish Up</a></li>
+      </ul>
+      <h2 id="start">Start Here</h2>
+      <p>The system is installed as the sole operating system.</p>
+    </article>"##;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+
+    assert!(cleaned.contains("The system is installed"));
+    assert!(cleaned.contains("Start Here</h2>"));
+    assert!(!cleaned.contains("href=\"#start\""));
+    assert!(!cleaned.contains("Configure</a>"));
+}
+
+#[test]
+fn keeps_short_fragment_link_lists_that_are_not_table_of_contents() {
+    let html = r##"
+    <article>
+      <h1>Release notes</h1>
+      <p>The two internal references below are part of the sentence flow.</p>
+      <ul>
+        <li><a href="#api">API compatibility note</a></li>
+        <li><a href="#migration">Migration footnote</a></li>
+      </ul>
+      <h2 id="api">API</h2>
+      <p>Keep the API section.</p>
+    </article>"##;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+
+    assert!(cleaned.contains("API compatibility note"));
+    assert!(cleaned.contains("Migration footnote"));
+    assert!(cleaned.contains("Keep the API section."));
+}
+
+#[test]
+fn removes_link_dense_related_sections() {
+    let html = r##"
+    <article>
+      <h1>How Coffee Cools</h1>
+      <p>Coffee cools following Newton's law of cooling.</p>
+      <section>
+        <p><a href="/pattern/">Maybe there's a pattern here?</a> · <a href="/#science">science</a> <a href="/#ai">AI</a></p>
+        <p><a href="/data-wall/">The real data wall is billions of years of evolution</a> · <a href="/#ai">AI</a></p>
+      </section>
+    </article>"##;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+
+    assert!(cleaned.contains("Coffee cools following"));
+    assert!(!cleaned.contains("Maybe there's a pattern"));
+    assert!(!cleaned.contains("The real data wall"));
+}
+
+#[test]
+fn keeps_mid_article_link_dense_resource_sections() {
+    let html = r##"
+    <article>
+      <h1>Protocol Notes</h1>
+      <p>Read these references before changing the parser.</p>
+      <section>
+        <p><a href="/spec/a">Specification A</a> · <a href="/spec/b">Specification B</a></p>
+        <p><a href="/guide">Implementation guide</a> · <a href="/examples">Examples</a></p>
+      </section>
+      <p>The next paragraph explains why those links matter to the implementation.</p>
+    </article>"##;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+
+    assert!(cleaned.contains("Specification A"));
+    assert!(cleaned.contains("Implementation guide"));
+    assert!(cleaned.contains("The next paragraph explains"));
 }
 
 #[test]
