@@ -210,6 +210,8 @@ fn matches_reference_pages_for_representative_urls() {
                 "Download the official app",
                 "New to Mastodon?",
                 "Promoted suggestion",
+                "Promoted status card",
+                "Promoted Person",
                 "Mobile apps",
                 "Reply",
                 "Boost",
@@ -260,7 +262,12 @@ fn federated_status_reply_is_nested_once() {
             "> This makes saved social threads much easier to read from the CLI.",
         ],
     );
+    assert!(!markdown.contains("> Alice Example"));
+    assert!(!markdown.contains("Earlier context should not become the primary status."));
+    assert!(!markdown.contains("Promoted status card"));
+    assert_occurs_once(&markdown, "Alice Example");
     assert_occurs_once(&markdown, "Bob Builder");
+    assert_occurs_once(&markdown, "Shipping a tiny parser improvement today.");
     assert_occurs_once(
         &markdown,
         "This makes saved social threads much easier to read from the CLI.",

@@ -18,6 +18,19 @@
     </aside>
     <main class="public-layout__main">
       <section class="status-thread">
+        <article class="status status-public" data-id="112233445566778898">
+          <header class="status__info">
+            <a class="status__display-name" href="/@context">
+              <strong class="display-name__html">Context Person</strong>
+              <span class="display-name__account">@context@example.org</span>
+            </a>
+            <time datetime="2026-05-08T14:55:00Z">May 8, 2026, 2:55 PM</time>
+          </header>
+          <div class="status__content">
+            <p>Earlier context should not become the primary status.</p>
+          </div>
+        </article>
+
         <article class="status status-public detailed-status" data-id="112233445566778899">
           <header class="status__info">
             <a class="status__display-name" href="/@alice">
@@ -50,15 +63,23 @@
           </div>
         </article>
       </section>
+      <section class="getting-started">
+        <h2>New to Mastodon?</h2>
+        <p>Join a server and follow friends.</p>
+      </section>
+      <section class="trends">
+        <h2>Boosted posts</h2>
+        <p>Promoted suggestion that should never be extracted.</p>
+        <article data-id="999999999999999999">
+          <strong class="display-name__html">Promoted Person</strong>
+          <span class="display-name__account">@promoted@example.com</span>
+          <time>May 8, 2026, 4:00 PM</time>
+          <div class="status__content">
+            <p>Promoted status card that should not be extracted.</p>
+          </div>
+        </article>
+      </section>
     </main>
-    <section class="getting-started">
-      <h2>New to Mastodon?</h2>
-      <p>Join a server and follow friends.</p>
-    </section>
-    <section class="trends">
-      <h2>Boosted posts</h2>
-      <p>Promoted suggestion that should never be extracted.</p>
-    </section>
     <footer>
       <p>Mobile apps, keyboard shortcuts, privacy policy, and other chrome.</p>
     </footer>

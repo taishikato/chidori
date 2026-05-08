@@ -61,6 +61,7 @@ struct RedditSelectors {
 
 struct MastodonSelectors {
     statuses: Selector,
+    threads: Selector,
     display_names: Selector,
     handles: Selector,
     times: Selector,
@@ -148,6 +149,8 @@ fn mastodon_status_thread_candidate(doc: &ParsedDocument) -> Result<Option<Strin
     let selectors = MastodonSelectors {
         statuses: Selector::parse("article.status, article.status-public, article[data-id]")
             .map_err(|error| ChidoriError::Unknown(error.to_string()))?,
+        threads: Selector::parse(".status-thread")
+            .map_err(|error| ChidoriError::Unknown(error.to_string()))?,
         display_names: Selector::parse(
             ".display-name__html, .status__display-name strong, .p-name",
         )
@@ -159,14 +162,31 @@ fn mastodon_status_thread_candidate(doc: &ParsedDocument) -> Result<Option<Strin
             .map_err(|error| ChidoriError::Unknown(error.to_string()))?,
     };
 
-    let statuses: Vec<_> = doc.dom.select(&selectors.statuses).collect();
+    let Some(status_id) = mastodon_status_id(doc) else {
+        return Ok(None);
+    };
+    let Some(thread) = doc.dom.select(&selectors.threads).find(|candidate| {
+        candidate
+            .html()
+            .contains(&format!("data-id=\"{status_id}\""))
+    }) else {
+        return Ok(None);
+    };
+    let statuses: Vec<_> = thread.select(&selectors.statuses).collect();
     if statuses.is_empty() {
         return Ok(None);
     }
 
+    let Some(start_index) = statuses
+        .iter()
+        .position(|status| status.value().attr("data-id") == Some(status_id.as_str()))
+    else {
+        return Ok(None);
+    };
+
     let mut output = String::from("<article class=\"chidori-mastodon-thread\">");
     let mut status_count = 0;
-    for status in statuses {
+    for status in statuses.into_iter().skip(start_index) {
         if push_mastodon_status(&mut output, status, &selectors, status_count > 0) {
             status_count += 1;
         }
@@ -194,6 +214,13 @@ fn is_mastodon_status_path(doc: &ParsedDocument) -> bool {
                     .chars()
                     .all(|character| character.is_ascii_digit())
         })
+}
+
+fn mastodon_status_id(doc: &ParsedDocument) -> Option<String> {
+    doc.url.path_segments().and_then(|mut segments| {
+        let _account = segments.next()?;
+        segments.next().map(ToString::to_string)
+    })
 }
 
 fn push_mastodon_status(
