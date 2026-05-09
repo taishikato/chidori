@@ -8,6 +8,7 @@ use serde_json::Value;
 pub struct Metadata {
     pub url: String,
     pub final_url: String,
+    pub canonical_url: String,
     pub domain: String,
     pub title: String,
     pub description: String,
@@ -17,12 +18,22 @@ pub struct Metadata {
     pub author: String,
     pub published: String,
     pub language: String,
+    pub meta_tags: Vec<MetaTag>,
     pub schema_org_data: Option<Value>,
     pub word_count: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MetaTag {
+    pub name: Option<String>,
+    pub property: Option<String>,
+    pub content: Option<String>,
+}
+
 pub fn extract_metadata(doc: &ParsedDocument) -> Metadata {
     let schema_org_data = extract_schema_org_data(doc);
+    let meta_tags = collect_meta_tags(doc);
     let site = meta(doc, "property", "og:site_name")
         .or_else(|| schema_string(&schema_org_data, &["publisher.name"]))
         .or_else(|| schema_type_string(&schema_org_data, "WebSite", "name"))
@@ -32,11 +43,14 @@ pub fn extract_metadata(doc: &ParsedDocument) -> Metadata {
         .or_else(|| schema_string(&schema_org_data, &["headline"]))
         .or_else(|| schema_article_string(&schema_org_data, "name"))
         .or_else(|| title(doc).map(|title| clean_title(&title, &site)))
+        .filter(|title| !is_placeholder_title(title))
+        .or_else(|| h1_title(doc))
         .unwrap_or_default();
 
     Metadata {
         url: doc.url.to_string(),
         final_url: doc.url.to_string(),
+        canonical_url: canonical_url(doc),
         domain: doc.url.host_str().unwrap_or_default().to_string(),
         title,
         description: meta(doc, "name", "description")
@@ -51,6 +65,7 @@ pub fn extract_metadata(doc: &ParsedDocument) -> Metadata {
             .unwrap_or_default(),
         site,
         author: meta(doc, "name", "author")
+            .or_else(|| meta(doc, "name", "citation_author"))
             .or_else(|| meta(doc, "property", "article:author"))
             .or_else(|| schema_string(&schema_org_data, &["author.name", "creator.name"]))
             .or_else(|| schema_article_string(&schema_org_data, "author"))
@@ -58,10 +73,14 @@ pub fn extract_metadata(doc: &ParsedDocument) -> Metadata {
             .unwrap_or_default(),
         published: meta(doc, "property", "article:published_time")
             .or_else(|| meta(doc, "name", "date"))
+            .or_else(|| meta(doc, "name", "datePublished"))
+            .or_else(|| meta(doc, "name", "citation_publication_date"))
+            .or_else(|| time_datetime(doc))
             .or_else(|| schema_string(&schema_org_data, &["datePublished", "dateCreated"]))
             .unwrap_or_default(),
         language: schema_string(&schema_org_data, &["inLanguage"])
             .unwrap_or_else(|| html_lang(doc)),
+        meta_tags,
         schema_org_data,
         word_count: 0,
     }
@@ -117,6 +136,22 @@ fn title(doc: &ParsedDocument) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+fn h1_title(doc: &ParsedDocument) -> Option<String> {
+    let selector = Selector::parse("h1").unwrap();
+    doc.dom
+        .select(&selector)
+        .next()
+        .map(|node| node.text().collect::<Vec<_>>().join("").trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn is_placeholder_title(title: &str) -> bool {
+    matches!(
+        title.trim().to_ascii_lowercase().as_str(),
+        "" | "untitled" | "home" | "index" | "loading..." | "loading"
+    )
+}
+
 fn clean_title(title: &str, site: &str) -> String {
     let title = title.trim();
     let site = site.trim();
@@ -134,6 +169,45 @@ fn clean_title(title: &str, site: &str) -> String {
                 .map(ToString::to_string)
         })
         .unwrap_or_else(|| title.to_string())
+}
+
+fn canonical_url(doc: &ParsedDocument) -> String {
+    let selector = Selector::parse(r#"link[rel~="canonical"]"#).unwrap();
+    doc.dom
+        .select(&selector)
+        .next()
+        .and_then(|node| node.value().attr("href"))
+        .and_then(|href| doc.url.join(href).ok())
+        .map(|url| url.to_string())
+        .unwrap_or_default()
+}
+
+fn time_datetime(doc: &ParsedDocument) -> Option<String> {
+    let selector = Selector::parse("time[datetime]").unwrap();
+    doc.dom
+        .select(&selector)
+        .next()
+        .and_then(|node| node.value().attr("datetime"))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn collect_meta_tags(doc: &ParsedDocument) -> Vec<MetaTag> {
+    let selector = Selector::parse("meta").unwrap();
+    doc.dom
+        .select(&selector)
+        .filter_map(|node| {
+            let value = node.value();
+            let name = value.attr("name").map(ToString::to_string);
+            let property = value.attr("property").map(ToString::to_string);
+            let content = value.attr("content").map(ToString::to_string);
+            (name.is_some() || property.is_some() || content.is_some()).then_some(MetaTag {
+                name,
+                property,
+                content,
+            })
+        })
+        .collect()
 }
 
 fn html_lang(doc: &ParsedDocument) -> String {

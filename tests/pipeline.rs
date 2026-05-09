@@ -61,6 +61,38 @@ fn cleans_site_suffix_from_html_title_when_site_name_is_known() {
 }
 
 #[test]
+fn extracts_canonical_meta_tags_and_richer_article_metadata() {
+    let html = r#"<!doctype html>
+    <html lang="en">
+      <head>
+        <title>Untitled</title>
+        <link rel="canonical" href="/canonical-post">
+        <meta property="og:site_name" content="Example Site">
+        <meta name="citation_author" content="Katherine Johnson">
+        <meta name="datePublished" content="2026-05-08">
+        <meta name="description" content="A richer article">
+      </head>
+      <body>
+        <article>
+          <h1>Real Article Title</h1>
+          <p>Hello world.</p>
+        </article>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.title, "Real Article Title");
+    assert_eq!(metadata.canonical_url, "https://example.com/canonical-post");
+    assert_eq!(metadata.author, "Katherine Johnson");
+    assert_eq!(metadata.published, "2026-05-08");
+    assert!(metadata.meta_tags.iter().any(|tag| {
+        tag.name.as_deref() == Some("description")
+            && tag.content.as_deref() == Some("A richer article")
+    }));
+}
+
+#[test]
 fn extracts_extended_metadata_from_social_and_structured_sources() {
     let html = r#"<!doctype html>
     <html lang="en">
