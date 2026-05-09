@@ -273,7 +273,7 @@ fn known_site_content_candidate(
         .find(|title| !title.is_empty());
 
     let mut output = String::from("<article class=\"chidori-known-site-content\">");
-    if let Some(title) = title {
+    if let Some(title) = title.filter(|_| content.select(&title_selector).next().is_none()) {
         output.push_str("<h1>");
         output.push_str(&encode_text(&title));
         output.push_str("</h1>");
@@ -320,12 +320,16 @@ fn repository_discussion_candidate(doc: &ParsedDocument) -> Result<Option<String
     output.push_str(&encode_text(&title));
     output.push_str("</h1>");
 
-    if let Some(body) = bodies.first() {
+    let primary_body = bodies.first().copied();
+    if let Some(body) = primary_body {
         output.push_str(&body.inner_html());
     }
 
     for comment in doc.dom.select(&comment_selector) {
         if let Some(body) = comment.select(&body_selector).next() {
+            if Some(body) == primary_body {
+                continue;
+            }
             output.push_str("<blockquote>");
             output.push_str(&body.inner_html());
             output.push_str("</blockquote>");

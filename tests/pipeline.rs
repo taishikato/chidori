@@ -738,6 +738,61 @@ fn known_site_selectors_do_not_match_domain_suffix_false_positives() {
 }
 
 #[test]
+fn known_site_candidate_does_not_duplicate_title_already_inside_content() {
+    let html = r#"
+    <html><body>
+      <article>
+        <h1>Medium Article Title</h1>
+        <p>This medium article body should keep its existing title only once.</p>
+      </article>
+    </body></html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://medium.com/acme/post").unwrap());
+
+    let main = extract_main_content(&doc).unwrap();
+    let cleaned = clean_html(&main.html, &CleanOptions { no_images: false });
+    let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
+
+    assert_eq!(markdown.matches("Medium Article Title").count(), 1);
+    assert!(markdown.contains("This medium article body"));
+}
+
+#[test]
+fn repository_discussion_candidate_does_not_duplicate_primary_body_comment() {
+    let html = r#"
+    <html><body>
+      <main>
+        <h1><bdi data-testid="issue-title">Parser Diagnostics</bdi></h1>
+        <div class="timeline-comment">
+          <div class="markdown-body">
+            <p>Primary issue body should appear exactly once.</p>
+          </div>
+        </div>
+        <div class="timeline-comment">
+          <div class="markdown-body">
+            <p>Follow-up comment should still be preserved.</p>
+          </div>
+        </div>
+      </main>
+    </body></html>"#;
+    let doc = ParsedDocument::parse(
+        html,
+        Url::parse("https://github.com/acme/widgets/issues/42").unwrap(),
+    );
+
+    let main = extract_main_content(&doc).unwrap();
+    let cleaned = clean_html(&main.html, &CleanOptions { no_images: false });
+    let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
+
+    assert_eq!(
+        markdown
+            .matches("Primary issue body should appear exactly once.")
+            .count(),
+        1
+    );
+    assert!(markdown.contains("Follow-up comment should still be preserved."));
+}
+
+#[test]
 fn removes_noise_and_optionally_images() {
     let html = r#"
     <article>
