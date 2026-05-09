@@ -1,4 +1,6 @@
-# chidori
+<img src="https://github.com/user-attachments/assets/72b469ac-cb4d-413f-a372-2b3d98370c91" />
+
+# chidori ⚡️
 
 A fast Rust-built web-to-Markdown fetcher for coding agents.
 
