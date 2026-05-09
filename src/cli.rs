@@ -171,6 +171,7 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
         }
         Err(error) => return Err(error),
     };
+    fallback_steps.extend(extraction.fallbacks.iter().cloned());
     let markdown = extraction.markdown;
 
     let mut metadata = crate::metadata::extract_metadata(&doc);
@@ -304,6 +305,7 @@ struct ExtractionResult {
     content_selector: Option<String>,
     content_score: Option<isize>,
     removals: Vec<crate::cleaner::RemovalRecord>,
+    fallbacks: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -325,7 +327,7 @@ fn extract_markdown_from_doc(
     doc: &crate::document::ParsedDocument,
     config: &RunConfig,
 ) -> Result<ExtractionResult, ChidoriError> {
-    let (markdown, path, content_selector, content_score, removals) =
+    let (markdown, path, content_selector, content_score, removals, fallbacks) =
         if let Some(raw_markdown) = crate::markdown::extract_raw_markdown(&doc.html) {
             let raw_markdown = if config.no_images {
                 crate::markdown::remove_markdown_images(&raw_markdown)
@@ -343,15 +345,25 @@ fn extract_markdown_from_doc(
                 None,
                 None,
                 Vec::new(),
+                Vec::new(),
             )
         } else {
             let content = crate::extractor::extract_main_content(doc)?;
-            let cleaned = crate::cleaner::clean_html_with_report(
-                &content.html,
-                &crate::cleaner::CleanOptions {
-                    no_images: config.no_images,
-                },
-            );
+            let clean_options = crate::cleaner::CleanOptions {
+                no_images: config.no_images,
+            };
+            let cleaned = if content
+                .fallbacks
+                .iter()
+                .any(|fallback| fallback == "hidden-content")
+            {
+                crate::cleaner::clean_html_preserving_hidden_with_report(
+                    &content.html,
+                    &clean_options,
+                )
+            } else {
+                crate::cleaner::clean_html_with_report(&content.html, &clean_options)
+            };
             let markdown = crate::markdown::html_to_markdown(
                 &cleaned.html,
                 &crate::markdown::MarkdownOptions {
@@ -367,6 +379,7 @@ fn extract_markdown_from_doc(
                 content.selector,
                 content.score,
                 cleaned.removals,
+                content.fallbacks,
             )
         };
 
@@ -379,6 +392,7 @@ fn extract_markdown_from_doc(
             content_selector,
             content_score,
             removals,
+            fallbacks,
         })
     }
 }

@@ -50,6 +50,7 @@ pub struct ExtractedContent {
     pub html: String,
     pub selector: Option<String>,
     pub score: Option<isize>,
+    pub fallbacks: Vec<String>,
 }
 
 struct ScoringSelectors {
@@ -99,6 +100,7 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
             html,
             selector: Some("youtube-watch".to_string()),
             score: None,
+            fallbacks: Vec::new(),
         });
     }
 
@@ -107,6 +109,7 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
             html,
             selector: Some("microblog-status-thread".to_string()),
             score: None,
+            fallbacks: Vec::new(),
         });
     }
 
@@ -115,6 +118,7 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
             html,
             selector: Some("mastodon-status-thread".to_string()),
             score: None,
+            fallbacks: Vec::new(),
         });
     }
 
@@ -123,6 +127,7 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
             html,
             selector: Some("hacker-news-listing".to_string()),
             score: None,
+            fallbacks: Vec::new(),
         });
     }
 
@@ -131,6 +136,7 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
             html,
             selector: Some("reddit-discussion".to_string()),
             score: None,
+            fallbacks: Vec::new(),
         });
     }
 
@@ -145,11 +151,21 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
         .map_err(|error| ChidoriError::Unknown(error.to_string()))?,
     };
 
+    let mut fallback_steps = Vec::new();
     let mut best_candidate =
-        best_candidate_for_selectors(doc, PRIMARY_ENTRY_SELECTORS, &selectors)?;
+        best_candidate_for_selectors(doc, PRIMARY_ENTRY_SELECTORS, &selectors, false)?;
 
     if best_candidate.is_none() {
-        best_candidate = best_candidate_for_selectors(doc, BODY_FALLBACK_SELECTORS, &selectors)?;
+        best_candidate =
+            best_candidate_for_selectors(doc, BODY_FALLBACK_SELECTORS, &selectors, false)?;
+    }
+
+    if best_candidate.is_none() {
+        best_candidate =
+            best_candidate_for_selectors(doc, PRIMARY_ENTRY_SELECTORS, &selectors, true)?;
+        if best_candidate.is_some() {
+            fallback_steps.push("hidden-content".to_string());
+        }
     }
 
     let mut used_structured_content = false;
@@ -173,7 +189,7 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
             .filter(|candidate| candidate.word_count < LOW_WORD_COUNT_RETRY_THRESHOLD)
         {
             if let Some(body_candidate) =
-                best_candidate_for_selectors(doc, BODY_FALLBACK_SELECTORS, &selectors)?
+                best_candidate_for_selectors(doc, BODY_FALLBACK_SELECTORS, &selectors, false)?
             {
                 if should_retry_with_body(candidate, &body_candidate) {
                     best_candidate = Some(body_candidate);
@@ -187,12 +203,14 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
             html: candidate.html,
             selector: Some(candidate.selector),
             score: Some(candidate.score),
+            fallbacks: fallback_steps,
         })
     } else if let Some(html) = structured_content_candidate(doc, 0)? {
         Ok(ExtractedContent {
             html,
             selector: Some("schema-org".to_string()),
             score: None,
+            fallbacks: vec!["schema-org".to_string()],
         })
     } else {
         Err(ChidoriError::ExtractionFailed)
@@ -1148,11 +1166,24 @@ fn should_retry_with_body(candidate: &Candidate, body_candidate: &Candidate) -> 
     body_candidate.content_block_count > 1
 }
 
+#[cfg(test)]
 fn score_element(
     element: ElementRef<'_>,
     selectors: &ScoringSelectors,
 ) -> (isize, usize, usize, usize) {
-    let text = text_without_invisible_nodes(&element.html());
+    score_element_with_visibility(element, selectors, false)
+}
+
+fn score_element_with_visibility(
+    element: ElementRef<'_>,
+    selectors: &ScoringSelectors,
+    include_hidden: bool,
+) -> (isize, usize, usize, usize) {
+    let text = if include_hidden {
+        element.text().collect::<Vec<_>>().join(" ")
+    } else {
+        text_without_invisible_nodes(&element.html())
+    };
     let word_count = text.split_whitespace().count();
     let paragraph_count = element.select(&selectors.paragraphs).count();
     let content_block_count = element.select(&selectors.body_content_blocks).count();
@@ -1225,6 +1256,7 @@ fn best_candidate_for_selectors(
     doc: &ParsedDocument,
     raw_selectors: &[&str],
     selectors: &ScoringSelectors,
+    include_hidden: bool,
 ) -> Result<Option<Candidate>, ChidoriError> {
     let mut best_candidate: Option<Candidate> = None;
 
@@ -1233,7 +1265,7 @@ fn best_candidate_for_selectors(
             .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
         for element in doc.dom.select(&selector) {
             let (content_score, word_count, _paragraph_count, content_block_count) =
-                score_element(element, selectors);
+                score_element_with_visibility(element, selectors, include_hidden);
             if word_count == 0 {
                 continue;
             }

@@ -26,6 +26,14 @@ pub fn clean_html(html: &str, options: &CleanOptions) -> String {
 }
 
 pub fn clean_html_with_report(html: &str, options: &CleanOptions) -> CleanResult {
+    clean_html_inner(html, options, true)
+}
+
+pub fn clean_html_preserving_hidden_with_report(html: &str, options: &CleanOptions) -> CleanResult {
+    clean_html_inner(html, options, false)
+}
+
+fn clean_html_inner(html: &str, options: &CleanOptions, remove_hidden: bool) -> CleanResult {
     let mut cleaned = html.to_string();
     let mut removals = Vec::new();
     for tag in [
@@ -36,9 +44,11 @@ pub fn clean_html_with_report(html: &str, options: &CleanOptions) -> CleanResult
         push_removal_if_changed(&mut removals, &cleaned, &next, "noise-tag", tag);
         cleaned = next;
     }
-    let next = remove_hidden_elements(&cleaned);
-    push_removal_if_changed(&mut removals, &cleaned, &next, "hidden-element", "[hidden]");
-    cleaned = next;
+    if remove_hidden {
+        let next = remove_hidden_elements(&cleaned);
+        push_removal_if_changed(&mut removals, &cleaned, &next, "hidden-element", "[hidden]");
+        cleaned = next;
+    }
     let next = remove_navigation_like_blocks(&cleaned);
     push_removal_if_changed(
         &mut removals,

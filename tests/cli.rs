@@ -323,6 +323,45 @@ This fallback markdown body came from the bot user agent.
 }
 
 #[tokio::test]
+async fn json_debug_records_hidden_content_fallback() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/hidden-article"))
+        .respond_with(html_response(
+            r#"
+            <html><head><title>Hidden Article</title></head><body>
+              <article hidden>
+                <h1>Hidden Article</h1>
+                <p>This useful article is hidden in the raw HTML but can still be recovered.</p>
+              </article>
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/hidden-article", server.uri()))
+        .arg("--json")
+        .arg("--debug")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["debug"]["contentSelector"], "article");
+    assert!(json["debug"]["fallbacks"]
+        .as_array()
+        .unwrap()
+        .contains(&Value::String("hidden-content".to_string())));
+    assert!(json["markdown"]
+        .as_str()
+        .unwrap()
+        .contains("Hidden Article"));
+}
+
+#[tokio::test]
 async fn does_not_retry_with_bot_user_agent_when_initial_page_is_extractable() {
     let server = MockServer::start().await;
 
