@@ -231,6 +231,45 @@ async fn source_url_exercises_domain_specific_extraction_for_local_fixtures() {
 }
 
 #[tokio::test]
+async fn source_url_extracts_repository_issue_discussion() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repo-issue"))
+        .respond_with(html_response(
+            r#"
+            <html><body>
+              <aside>Repository sidebar noise</aside>
+              <main>
+                <bdi>Improve parser diagnostics</bdi>
+                <div class="markdown-body"><p>Issue body with useful reproduction details.</p></div>
+                <div class="timeline-comment">
+                  <a class="author">alice</a>
+                  <div class="markdown-body"><p>First comment should be preserved.</p></div>
+                </div>
+              </main>
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/repo-issue", server.uri()))
+        .arg("--source-url")
+        .arg("https://github.com/acme/widgets/issues/42")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Improve parser diagnostics"))
+        .stdout(predicate::str::contains(
+            "Issue body with useful reproduction details.",
+        ))
+        .stdout(predicate::str::contains(
+            "First comment should be preserved.",
+        ))
+        .stdout(predicate::str::contains("Repository sidebar noise").not());
+}
+
+#[tokio::test]
 async fn retries_with_bot_user_agent_when_initial_page_has_no_extractable_content() {
     let server = MockServer::start().await;
 

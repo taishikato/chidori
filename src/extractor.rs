@@ -122,6 +122,15 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
         });
     }
 
+    if let Some(html) = repository_discussion_candidate(doc)? {
+        return Ok(ExtractedContent {
+            html,
+            selector: Some("repository-discussion".to_string()),
+            score: None,
+            fallbacks: Vec::new(),
+        });
+    }
+
     if let Some(html) = hacker_news_listing_candidate(doc)? {
         return Ok(ExtractedContent {
             html,
@@ -215,6 +224,68 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
     } else {
         Err(ChidoriError::ExtractionFailed)
     }
+}
+
+fn repository_discussion_candidate(doc: &ParsedDocument) -> Result<Option<String>, ChidoriError> {
+    if !is_repository_discussion_path(doc) {
+        return Ok(None);
+    }
+
+    let title_selector =
+        Selector::parse("bdi, h1").map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let body_selector = Selector::parse(".markdown-body")
+        .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let comment_selector = Selector::parse(".timeline-comment, [data-testid=\"issue-comment\"]")
+        .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+
+    let Some(title) = doc
+        .dom
+        .select(&title_selector)
+        .map(element_text)
+        .find(|title| !title.is_empty())
+    else {
+        return Ok(None);
+    };
+    let bodies = doc.dom.select(&body_selector).collect::<Vec<_>>();
+    if bodies.is_empty() {
+        return Ok(None);
+    }
+
+    let mut output = String::from("<article class=\"chidori-repository-discussion\">");
+    output.push_str("<h1>");
+    output.push_str(&encode_text(&title));
+    output.push_str("</h1>");
+
+    if let Some(body) = bodies.first() {
+        output.push_str(&body.inner_html());
+    }
+
+    for comment in doc.dom.select(&comment_selector) {
+        if let Some(body) = comment.select(&body_selector).next() {
+            output.push_str("<blockquote>");
+            output.push_str(&body.inner_html());
+            output.push_str("</blockquote>");
+        }
+    }
+
+    output.push_str("</article>");
+    Ok(Some(output))
+}
+
+fn is_repository_discussion_path(doc: &ParsedDocument) -> bool {
+    let Some(host) = doc.url.host_str() else {
+        return false;
+    };
+    if host != "github.com" && !host.ends_with(".github.com") {
+        return false;
+    }
+    let segments = doc
+        .url
+        .path_segments()
+        .map(|segments| segments.collect::<Vec<_>>())
+        .unwrap_or_default();
+
+    segments.len() >= 4 && matches!(segments[2], "issues" | "pull")
 }
 
 fn youtube_watch_candidate(doc: &ParsedDocument) -> Result<Option<String>, ChidoriError> {
