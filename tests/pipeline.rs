@@ -772,6 +772,23 @@ fn unwraps_javascript_links_without_losing_inner_content() {
 }
 
 #[test]
+fn cleaner_strips_dangerous_attributes_from_remaining_elements() {
+    let html = r#"
+    <article>
+      <p onclick="steal()">Keep this paragraph.</p>
+      <iframe srcdoc="<script>alert(1)</script>"></iframe>
+      <img src="javascript:alert(1)" alt="Bad image">
+    </article>"#;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+
+    assert!(cleaned.contains("Keep this paragraph."));
+    assert!(!cleaned.contains("onclick"));
+    assert!(!cleaned.contains("srcdoc"));
+    assert!(!cleaned.contains("javascript:"));
+}
+
+#[test]
 fn converts_math_elements_to_markdown_delimiters() {
     let html = r#"
     <article>

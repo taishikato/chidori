@@ -71,6 +71,7 @@ fn clean_html_inner(html: &str, options: &CleanOptions, remove_hidden: bool) -> 
     );
     cleaned = next;
     cleaned = unwrap_javascript_links(&cleaned);
+    cleaned = strip_dangerous_attributes(&cleaned);
     if options.no_images {
         let next = remove_tag(&cleaned, "img");
         push_removal_if_changed(&mut removals, &cleaned, &next, "image-disabled", "img");
@@ -208,6 +209,90 @@ fn unwrap_javascript_links(html: &str) -> String {
                 .starts_with("javascript:")
         })
     })
+}
+
+fn strip_dangerous_attributes(html: &str) -> String {
+    let mut output = String::with_capacity(html.len());
+    let mut rest = html;
+
+    while let Some(index) = rest.find('<') {
+        output.push_str(&rest[..index]);
+        let candidate = &rest[index..];
+        let Some(end) = candidate.find('>') else {
+            output.push_str(candidate);
+            return output;
+        };
+        let opening_tag = &candidate[..=end];
+        if opening_tag.starts_with("</") || opening_tag.starts_with("<!--") {
+            output.push_str(opening_tag);
+        } else {
+            output.push_str(&sanitize_opening_tag(opening_tag));
+        }
+        rest = &candidate[end + 1..];
+    }
+
+    output.push_str(rest);
+    output
+}
+
+fn sanitize_opening_tag(opening_tag: &str) -> String {
+    let input = opening_tag
+        .strip_prefix('<')
+        .and_then(|value| value.strip_suffix('>'))
+        .unwrap_or(opening_tag)
+        .trim();
+    let self_closing = input.ends_with('/');
+    let input = input.trim_end_matches('/').trim_end();
+    let name_end = input
+        .find(|ch: char| ch.is_ascii_whitespace() || ch == '/')
+        .unwrap_or(input.len());
+    let tag_name = &input[..name_end];
+    if tag_name.is_empty() {
+        return opening_tag.to_string();
+    }
+
+    let mut output = format!("<{tag_name}");
+    for (name, value) in (OpeningAttributes {
+        input: &input[name_end..],
+    }) {
+        if is_dangerous_attribute(name, value) {
+            continue;
+        }
+
+        output.push(' ');
+        output.push_str(name);
+        if let Some(value) = value {
+            output.push_str("=\"");
+            output.push_str(&html_escape::encode_double_quoted_attribute(value));
+            output.push('"');
+        }
+    }
+    if self_closing {
+        output.push_str(" /");
+    }
+    output.push('>');
+    output
+}
+
+fn is_dangerous_attribute(name: &str, value: Option<&str>) -> bool {
+    let name = name.to_ascii_lowercase();
+    if name.starts_with("on") || name == "srcdoc" {
+        return true;
+    }
+
+    matches!(
+        name.as_str(),
+        "href" | "src" | "action" | "formaction" | "xlink:href"
+    ) && value.is_some_and(is_dangerous_url)
+}
+
+fn is_dangerous_url(value: &str) -> bool {
+    let normalized = value
+        .chars()
+        .filter(|ch| !ch.is_ascii_whitespace() && !ch.is_control())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    normalized.starts_with("javascript:") || normalized.starts_with("data:text/html")
 }
 
 fn has_class_token(opening_tag: &str, expected: &str) -> bool {
