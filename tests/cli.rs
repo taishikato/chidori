@@ -270,6 +270,40 @@ async fn source_url_extracts_repository_issue_discussion() {
 }
 
 #[tokio::test]
+async fn source_url_prefers_known_encyclopedia_content_selector() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/wiki"))
+        .respond_with(html_response(
+            r#"
+            <html><body>
+              <main>
+                <div class="sidebar">Navigation box should not win.</div>
+                <h1 id="firstHeading">Parser Combinators</h1>
+                <div id="mw-content-text">
+                  <p>Parser combinators are a technique for building parsers from small functions.</p>
+                </div>
+              </main>
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/wiki", server.uri()))
+        .arg("--source-url")
+        .arg("https://en.wikipedia.org/wiki/Parser_combinator")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Parser Combinators"))
+        .stdout(predicate::str::contains(
+            "Parser combinators are a technique",
+        ))
+        .stdout(predicate::str::contains("Navigation box should not win").not());
+}
+
+#[tokio::test]
 async fn retries_with_bot_user_agent_when_initial_page_has_no_extractable_content() {
     let server = MockServer::start().await;
 

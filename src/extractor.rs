@@ -131,6 +131,15 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
         });
     }
 
+    if let Some((selector, html)) = known_site_content_candidate(doc)? {
+        return Ok(ExtractedContent {
+            html,
+            selector: Some(selector),
+            score: None,
+            fallbacks: Vec::new(),
+        });
+    }
+
     if let Some(html) = hacker_news_listing_candidate(doc)? {
         return Ok(ExtractedContent {
             html,
@@ -224,6 +233,55 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
     } else {
         Err(ChidoriError::ExtractionFailed)
     }
+}
+
+fn known_site_content_candidate(
+    doc: &ParsedDocument,
+) -> Result<Option<(String, String)>, ChidoriError> {
+    let Some(host) = doc.url.host_str() else {
+        return Ok(None);
+    };
+
+    let content_selector = if host == "en.wikipedia.org" || host.ends_with(".wikipedia.org") {
+        "#mw-content-text"
+    } else if host.ends_with("medium.com") {
+        "article"
+    } else if host.ends_with("substack.com") {
+        "article, .body.markup, .available-content"
+    } else if host.contains("discourse") {
+        ".topic-post .cooked, #post_1 .cooked, article .cooked"
+    } else {
+        return Ok(None);
+    };
+
+    let selector = Selector::parse(content_selector)
+        .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let Some(content) = doc
+        .dom
+        .select(&selector)
+        .find(|content| !element_text(*content).is_empty())
+    else {
+        return Ok(None);
+    };
+
+    let title_selector = Selector::parse("h1, #firstHeading")
+        .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let title = doc
+        .dom
+        .select(&title_selector)
+        .map(element_text)
+        .find(|title| !title.is_empty());
+
+    let mut output = String::from("<article class=\"chidori-known-site-content\">");
+    if let Some(title) = title {
+        output.push_str("<h1>");
+        output.push_str(&encode_text(&title));
+        output.push_str("</h1>");
+    }
+    output.push_str(&content.inner_html());
+    output.push_str("</article>");
+
+    Ok(Some((content_selector.to_string(), output)))
 }
 
 fn repository_discussion_candidate(doc: &ParsedDocument) -> Result<Option<String>, ChidoriError> {
