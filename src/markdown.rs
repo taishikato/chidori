@@ -11,12 +11,13 @@ pub fn html_to_markdown(html: &str, options: &MarkdownOptions) -> String {
     let mut markdown = html2md::parse_html(&specialized.html);
     markdown = markdown
         .lines()
-        .map(str::trim_end)
+        .map(trim_markdown_line_end)
         .collect::<Vec<_>>()
         .join("\n")
         .replace("\n\n\n", "\n\n")
         .trim()
         .to_string();
+    markdown = unwrap_soft_wrapped_paragraphs(&markdown);
     markdown = normalize_setext_headings(&markdown);
     markdown = annotate_code_fences(&markdown, &code_block_languages);
     markdown = specialized.restore(markdown);
@@ -45,6 +46,113 @@ pub fn extract_raw_markdown(html: &str) -> Option<String> {
         return None;
     }
     Some(markdown.replace("\n\n\n", "\n\n").trim().to_string())
+}
+
+fn unwrap_soft_wrapped_paragraphs(markdown: &str) -> String {
+    let lines = markdown.lines().collect::<Vec<_>>();
+    let mut output = Vec::with_capacity(lines.len());
+    let mut index = 0;
+    let mut in_fence = false;
+
+    while index < lines.len() {
+        let line = lines[index];
+        if is_backtick_fence(line) {
+            in_fence = !in_fence;
+            output.push(line.to_string());
+            index += 1;
+            continue;
+        }
+
+        if !in_fence && is_list_item_line(line.trim_start()) {
+            let mut item = line.trim_end().to_string();
+            index += 1;
+
+            while index < lines.len() && is_paragraph_line(lines[index]) {
+                item.push(' ');
+                item.push_str(lines[index].trim());
+                index += 1;
+            }
+
+            output.push(item);
+            continue;
+        }
+
+        if in_fence || !is_paragraph_line(line) {
+            output.push(line.to_string());
+            index += 1;
+            continue;
+        }
+
+        let mut paragraph = line.trim().to_string();
+        index += 1;
+
+        while index < lines.len() && is_paragraph_line(lines[index]) {
+            paragraph.push(' ');
+            paragraph.push_str(lines[index].trim());
+            index += 1;
+        }
+
+        output.push(paragraph);
+    }
+
+    output.join("\n")
+}
+
+fn trim_markdown_line_end(line: &str) -> &str {
+    if line.ends_with("  ") && !line.trim().is_empty() {
+        line
+    } else {
+        line.trim_end()
+    }
+}
+
+fn is_paragraph_line(line: &str) -> bool {
+    let content = line.trim_start();
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if content.ends_with("  ") || trimmed.ends_with('\\') {
+        return false;
+    }
+    if is_backtick_fence(trimmed) {
+        return false;
+    }
+    if trimmed.starts_with('|') || trimmed.ends_with('|') {
+        return false;
+    }
+    if trimmed.starts_with('#')
+        || trimmed.starts_with('>')
+        || trimmed.starts_with("* ")
+        || trimmed.starts_with("- ")
+        || trimmed.starts_with("+ ")
+        || trimmed.starts_with("---")
+        || is_setext_heading_marker(trimmed)
+    {
+        return false;
+    }
+    if is_ordered_list_line(trimmed) {
+        return false;
+    }
+    true
+}
+
+fn is_setext_heading_marker(line: &str) -> bool {
+    line.len() >= 3 && (line.chars().all(|ch| ch == '=') || line.chars().all(|ch| ch == '-'))
+}
+
+fn is_ordered_list_line(line: &str) -> bool {
+    let Some((marker, rest)) = line.split_once(". ") else {
+        return false;
+    };
+    !rest.is_empty() && marker.chars().all(|ch| ch.is_ascii_digit())
+}
+
+fn is_list_item_line(line: &str) -> bool {
+    line.starts_with("* ")
+        || line.starts_with("- ")
+        || line.starts_with("+ ")
+        || is_ordered_list_line(line)
 }
 
 pub fn remove_markdown_images(markdown: &str) -> String {

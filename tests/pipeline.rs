@@ -1131,6 +1131,95 @@ fn converts_html_to_agent_friendly_markdown() {
 }
 
 #[test]
+fn unwraps_soft_wrapped_paragraphs_without_flattening_blocks() {
+    let long_text = "This paragraph is long enough for html2md to wrap it across multiple output lines, but the markdown renderer should keep it as one paragraph line for cleaner downstream parsing and comparison.";
+    let html = format!(
+        r#"
+    <article>
+      <p>{long_text}</p>
+      <ol>
+        <li>First item that should remain a list item.</li>
+        <li>Second item that should remain a list item.</li>
+      </ol>
+      <pre><code>alpha
+beta</code></pre>
+    </article>"#
+    );
+
+    let markdown = html_to_markdown(&html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains(long_text));
+    assert!(markdown.contains("1. First item that should remain a list item."));
+    assert!(markdown.contains("2. Second item that should remain a list item."));
+    assert!(markdown.contains("```\nalpha\nbeta\n```"));
+}
+
+#[test]
+fn unwraps_soft_wrapped_paragraphs_without_breaking_setext_headings() {
+    let html = r#"
+    <article>
+      <h1>Setext Title</h1>
+      <p>Short body.</p>
+    </article>"#;
+
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("# Setext Title"));
+    assert!(!markdown.contains("Setext Title =========="));
+}
+
+#[test]
+fn unwraps_soft_wrapped_paragraphs_without_flattening_br_breaks() {
+    let html = r#"
+    <article>
+      <p>First line<br>Second line</p>
+    </article>"#;
+
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("First line  \nSecond line"));
+    assert!(!markdown.contains("First line Second line"));
+}
+
+#[test]
+fn unwraps_soft_wrapped_list_items() {
+    let long_item = "A list item can be long enough for html2md to wrap the continuation onto another line, but it should stay on the same markdown list line.";
+    let html = format!(
+        r#"
+    <article>
+      <ul>
+        <li>{long_item}</li>
+      </ul>
+    </article>"#
+    );
+
+    let markdown = html_to_markdown(&html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains(&format!("* {long_item}")));
+}
+
+#[test]
+fn unwraps_soft_wrapped_list_items_without_flattening_nested_lists() {
+    let child_item = "Nested list items should keep their indentation even when the parent list item is normalized.";
+    let html = format!(
+        r#"
+    <article>
+      <ul>
+        <li>Parent item
+          <ul>
+            <li>{child_item}</li>
+          </ul>
+        </li>
+      </ul>
+    </article>"#
+    );
+
+    let markdown = html_to_markdown(&html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains(&format!("  * {child_item}")));
+}
+
+#[test]
 fn keeps_code_fence_languages_aligned_with_their_code_blocks() {
     let html = r#"
     <article>
