@@ -720,6 +720,47 @@ async fn json_debug_includes_selected_content_candidate_details() {
 }
 
 #[tokio::test]
+async fn json_debug_includes_cleanup_removal_reasons() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/removal-debug"))
+        .respond_with(html_response(
+            r#"
+            <html><head><title>Removal Debug</title></head><body>
+              <article>
+                <h1>Removal Debug</h1>
+                <nav>Article-local menu</nav>
+                <p>Useful body survives cleanup.</p>
+              </article>
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/removal-debug", server.uri()))
+        .arg("--json")
+        .arg("--debug")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let removals = json["debug"]["removals"].as_array().unwrap();
+    assert!(removals.iter().any(|removal| {
+        removal["step"] == "clean-html"
+            && removal["reason"] == "noise-tag"
+            && removal["selector"] == "nav"
+    }));
+    assert!(!json["markdown"]
+        .as_str()
+        .unwrap()
+        .contains("Article-local menu"));
+}
+
+#[tokio::test]
 async fn json_debug_reports_body_selector_after_low_word_retry() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

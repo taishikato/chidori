@@ -1,28 +1,97 @@
 use scraper::{Html, Selector};
+use serde::Serialize;
 
 #[derive(Debug, Clone, Copy)]
 pub struct CleanOptions {
     pub no_images: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemovalRecord {
+    pub step: String,
+    pub reason: String,
+    pub selector: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct CleanResult {
+    pub html: String,
+    pub removals: Vec<RemovalRecord>,
+}
+
 pub fn clean_html(html: &str, options: &CleanOptions) -> String {
+    clean_html_with_report(html, options).html
+}
+
+pub fn clean_html_with_report(html: &str, options: &CleanOptions) -> CleanResult {
     let mut cleaned = html.to_string();
+    let mut removals = Vec::new();
     for tag in [
         "script", "style", "noscript", "nav", "footer", "aside", "button", "form", "iframe",
         "object", "embed",
     ] {
-        cleaned = remove_tag(&cleaned, tag);
+        let next = remove_tag(&cleaned, tag);
+        push_removal_if_changed(&mut removals, &cleaned, &next, "noise-tag", tag);
+        cleaned = next;
     }
-    cleaned = remove_hidden_elements(&cleaned);
-    cleaned = remove_navigation_like_blocks(&cleaned);
-    cleaned = remove_fragment_only_link_lists(&cleaned);
-    cleaned = remove_link_dense_related_sections(&cleaned);
+    let next = remove_hidden_elements(&cleaned);
+    push_removal_if_changed(&mut removals, &cleaned, &next, "hidden-element", "[hidden]");
+    cleaned = next;
+    let next = remove_navigation_like_blocks(&cleaned);
+    push_removal_if_changed(
+        &mut removals,
+        &cleaned,
+        &next,
+        "navigation-like-block",
+        "[data-block=\"nav\"], .breadcrumb, .toc",
+    );
+    cleaned = next;
+    let next = remove_fragment_only_link_lists(&cleaned);
+    push_removal_if_changed(&mut removals, &cleaned, &next, "fragment-link-list", "ul");
+    cleaned = next;
+    let next = remove_link_dense_related_sections(&cleaned);
+    push_removal_if_changed(
+        &mut removals,
+        &cleaned,
+        &next,
+        "link-dense-related-section",
+        "section",
+    );
+    cleaned = next;
     cleaned = unwrap_javascript_links(&cleaned);
     if options.no_images {
-        cleaned = remove_tag(&cleaned, "img");
-        cleaned = remove_tag(&cleaned, "picture");
+        let next = remove_tag(&cleaned, "img");
+        push_removal_if_changed(&mut removals, &cleaned, &next, "image-disabled", "img");
+        cleaned = next;
+        let next = remove_tag(&cleaned, "picture");
+        push_removal_if_changed(&mut removals, &cleaned, &next, "image-disabled", "picture");
+        cleaned = next;
     }
-    cleaned
+    CleanResult {
+        html: cleaned,
+        removals,
+    }
+}
+
+fn push_removal_if_changed(
+    removals: &mut Vec<RemovalRecord>,
+    before: &str,
+    after: &str,
+    reason: &str,
+    selector: &str,
+) {
+    if before == after {
+        return;
+    }
+
+    removals.push(RemovalRecord {
+        step: "clean-html".to_string(),
+        reason: reason.to_string(),
+        selector: selector.to_string(),
+        count: 1,
+    });
 }
 
 fn remove_hidden_elements(html: &str) -> String {

@@ -197,6 +197,7 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
         word_count: metadata.word_count,
         content_selector: extraction.content_selector.clone(),
         content_score: extraction.content_score,
+        removals: extraction.removals.clone(),
         timings: crate::output::DebugTimings {
             total_ms: started.elapsed().as_millis(),
         },
@@ -242,6 +243,7 @@ struct ExtractionResult {
     path: ExtractionPath,
     content_selector: Option<String>,
     content_score: Option<isize>,
+    removals: Vec<crate::cleaner::RemovalRecord>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -263,7 +265,7 @@ fn extract_markdown_from_doc(
     doc: &crate::document::ParsedDocument,
     config: &RunConfig,
 ) -> Result<ExtractionResult, ChidoriError> {
-    let (markdown, path, content_selector, content_score) =
+    let (markdown, path, content_selector, content_score, removals) =
         if let Some(raw_markdown) = crate::markdown::extract_raw_markdown(&doc.html) {
             let raw_markdown = if config.no_images {
                 crate::markdown::remove_markdown_images(&raw_markdown)
@@ -275,17 +277,23 @@ fn extract_markdown_from_doc(
             } else {
                 raw_markdown
             };
-            (markdown, ExtractionPath::RawMarkdown, None, None)
+            (
+                markdown,
+                ExtractionPath::RawMarkdown,
+                None,
+                None,
+                Vec::new(),
+            )
         } else {
             let content = crate::extractor::extract_main_content(doc)?;
-            let cleaned = crate::cleaner::clean_html(
+            let cleaned = crate::cleaner::clean_html_with_report(
                 &content.html,
                 &crate::cleaner::CleanOptions {
                     no_images: config.no_images,
                 },
             );
             let markdown = crate::markdown::html_to_markdown(
-                &cleaned,
+                &cleaned.html,
                 &crate::markdown::MarkdownOptions {
                     max_chars: config.max_chars,
                 },
@@ -295,6 +303,7 @@ fn extract_markdown_from_doc(
                 ExtractionPath::Html,
                 content.selector,
                 content.score,
+                cleaned.removals,
             )
         };
 
@@ -306,6 +315,7 @@ fn extract_markdown_from_doc(
             path,
             content_selector,
             content_score,
+            removals,
         })
     }
 }
