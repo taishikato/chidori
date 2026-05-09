@@ -39,9 +39,17 @@ const ARTICLE_RETRY_PROTECTION_MIN_WORDS: usize = 10;
 struct Candidate {
     score: isize,
     selector_index: usize,
+    selector: String,
     word_count: usize,
     content_block_count: usize,
     html: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExtractedContent {
+    pub html: String,
+    pub selector: Option<String>,
+    pub score: Option<isize>,
 }
 
 struct ScoringSelectors {
@@ -82,24 +90,48 @@ fn selector_priority(selector_count: usize, selector_index: usize) -> isize {
 }
 
 pub fn extract_main_html(doc: &ParsedDocument) -> Result<String, ChidoriError> {
+    extract_main_content(doc).map(|content| content.html)
+}
+
+pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, ChidoriError> {
     if let Some(html) = youtube_watch_candidate(doc)? {
-        return Ok(html);
+        return Ok(ExtractedContent {
+            html,
+            selector: Some("youtube-watch".to_string()),
+            score: None,
+        });
     }
 
     if let Some(html) = microblog_status_thread_candidate(doc)? {
-        return Ok(html);
+        return Ok(ExtractedContent {
+            html,
+            selector: Some("microblog-status-thread".to_string()),
+            score: None,
+        });
     }
 
     if let Some(html) = mastodon_status_thread_candidate(doc)? {
-        return Ok(html);
+        return Ok(ExtractedContent {
+            html,
+            selector: Some("mastodon-status-thread".to_string()),
+            score: None,
+        });
     }
 
     if let Some(html) = hacker_news_listing_candidate(doc)? {
-        return Ok(html);
+        return Ok(ExtractedContent {
+            html,
+            selector: Some("hacker-news-listing".to_string()),
+            score: None,
+        });
     }
 
     if let Some(html) = reddit_discussion_candidate(doc)? {
-        return Ok(html);
+        return Ok(ExtractedContent {
+            html,
+            selector: Some("reddit-discussion".to_string()),
+            score: None,
+        });
     }
 
     let selectors = ScoringSelectors {
@@ -127,6 +159,7 @@ pub fn extract_main_html(doc: &ParsedDocument) -> Result<String, ChidoriError> {
             best_candidate = Some(Candidate {
                 score: candidate.score,
                 selector_index: candidate.selector_index,
+                selector: "schema-org".to_string(),
                 word_count: text_word_count(&html),
                 content_block_count: candidate.content_block_count,
                 html,
@@ -150,9 +183,17 @@ pub fn extract_main_html(doc: &ParsedDocument) -> Result<String, ChidoriError> {
     }
 
     if let Some(candidate) = best_candidate {
-        Ok(candidate.html)
+        Ok(ExtractedContent {
+            html: candidate.html,
+            selector: Some(candidate.selector),
+            score: Some(candidate.score),
+        })
     } else if let Some(html) = structured_content_candidate(doc, 0)? {
-        Ok(html)
+        Ok(ExtractedContent {
+            html,
+            selector: Some("schema-org".to_string()),
+            score: None,
+        })
     } else {
         Err(ChidoriError::ExtractionFailed)
     }
@@ -1200,6 +1241,7 @@ fn best_candidate_for_selectors(
             let candidate = Candidate {
                 score,
                 selector_index,
+                selector: (*raw_selector).to_string(),
                 word_count,
                 content_block_count,
                 html: element.html(),

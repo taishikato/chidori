@@ -23,16 +23,22 @@ pub struct Metadata {
 
 pub fn extract_metadata(doc: &ParsedDocument) -> Metadata {
     let schema_org_data = extract_schema_org_data(doc);
+    let site = meta(doc, "property", "og:site_name")
+        .or_else(|| schema_string(&schema_org_data, &["publisher.name"]))
+        .or_else(|| schema_type_string(&schema_org_data, "WebSite", "name"))
+        .unwrap_or_default();
+    let title = meta(doc, "property", "og:title")
+        .or_else(|| meta(doc, "name", "twitter:title"))
+        .or_else(|| schema_string(&schema_org_data, &["headline"]))
+        .or_else(|| schema_article_string(&schema_org_data, "name"))
+        .or_else(|| title(doc).map(|title| clean_title(&title, &site)))
+        .unwrap_or_default();
+
     Metadata {
         url: doc.url.to_string(),
         final_url: doc.url.to_string(),
         domain: doc.url.host_str().unwrap_or_default().to_string(),
-        title: meta(doc, "property", "og:title")
-            .or_else(|| meta(doc, "name", "twitter:title"))
-            .or_else(|| schema_string(&schema_org_data, &["headline"]))
-            .or_else(|| schema_article_string(&schema_org_data, "name"))
-            .or_else(|| title(doc))
-            .unwrap_or_default(),
+        title,
         description: meta(doc, "name", "description")
             .or_else(|| meta(doc, "property", "og:description"))
             .or_else(|| meta(doc, "name", "twitter:description"))
@@ -43,10 +49,7 @@ pub fn extract_metadata(doc: &ParsedDocument) -> Metadata {
             .or_else(|| meta(doc, "name", "twitter:image"))
             .or_else(|| schema_string(&schema_org_data, &["image.url", "image"]))
             .unwrap_or_default(),
-        site: meta(doc, "property", "og:site_name")
-            .or_else(|| schema_string(&schema_org_data, &["publisher.name"]))
-            .or_else(|| schema_type_string(&schema_org_data, "WebSite", "name"))
-            .unwrap_or_default(),
+        site,
         author: meta(doc, "name", "author")
             .or_else(|| meta(doc, "property", "article:author"))
             .or_else(|| schema_string(&schema_org_data, &["author.name", "creator.name"]))
@@ -112,6 +115,25 @@ fn title(doc: &ParsedDocument) -> Option<String> {
         .next()
         .map(|node| node.text().collect::<Vec<_>>().join("").trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+fn clean_title(title: &str, site: &str) -> String {
+    let title = title.trim();
+    let site = site.trim();
+    if site.is_empty() {
+        return title.to_string();
+    }
+
+    [" | ", " - ", " – ", " — ", " :: "]
+        .iter()
+        .find_map(|separator| {
+            title
+                .strip_suffix(&format!("{separator}{site}"))
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+        })
+        .unwrap_or_else(|| title.to_string())
 }
 
 fn html_lang(doc: &ParsedDocument) -> String {

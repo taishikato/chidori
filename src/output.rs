@@ -8,12 +8,33 @@ pub enum RenderMode {
     Json,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugDiagnostics {
+    pub extraction_path: String,
+    pub fallbacks: Vec<String>,
+    pub word_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_selector: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_score: Option<isize>,
+    pub timings: DebugTimings,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugTimings {
+    pub total_ms: u128,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct JsonOutput<'a> {
     #[serde(flatten)]
     metadata: &'a Metadata,
     markdown: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    debug: Option<&'a DebugDiagnostics>,
 }
 
 pub fn render_output(
@@ -21,10 +42,23 @@ pub fn render_output(
     markdown: &str,
     mode: RenderMode,
 ) -> Result<String, ChidoriError> {
+    render_output_with_debug(metadata, markdown, mode, None)
+}
+
+pub fn render_output_with_debug(
+    metadata: &Metadata,
+    markdown: &str,
+    mode: RenderMode,
+    debug: Option<&DebugDiagnostics>,
+) -> Result<String, ChidoriError> {
     match mode {
         RenderMode::Markdown => Ok(markdown.to_string()),
-        RenderMode::Json => serde_json::to_string_pretty(&JsonOutput { metadata, markdown })
-            .map_err(|error| ChidoriError::OutputFailed(error.to_string())),
+        RenderMode::Json => serde_json::to_string_pretty(&JsonOutput {
+            metadata,
+            markdown,
+            debug,
+        })
+        .map_err(|error| ChidoriError::OutputFailed(error.to_string())),
     }
 }
 

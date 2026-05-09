@@ -44,6 +44,23 @@ fn extracts_basic_metadata() {
 }
 
 #[test]
+fn cleans_site_suffix_from_html_title_when_site_name_is_known() {
+    let html = r#"<!doctype html>
+    <html lang="en">
+      <head>
+        <title>Readable Article | Example Site</title>
+        <meta property="og:site_name" content="Example Site">
+      </head>
+      <body><article><p>Hello world.</p></article></body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.title, "Readable Article");
+    assert_eq!(metadata.site, "Example Site");
+}
+
+#[test]
 fn extracts_extended_metadata_from_social_and_structured_sources() {
     let html = r#"<!doctype html>
     <html lang="en">

@@ -130,7 +130,10 @@ fn is_supported_html_content_type(content_type: &str) -> bool {
 }
 
 fn decode_body(bytes: &[u8], content_type: &str) -> String {
-    match charset_from_content_type(content_type).as_deref() {
+    match charset_from_content_type(content_type)
+        .or_else(|| charset_from_meta_tag(bytes))
+        .as_deref()
+    {
         Some("windows-1252") => decode_windows_1252(bytes),
         Some("iso-8859-1") => bytes.iter().map(|&byte| char::from(byte)).collect(),
         _ => String::from_utf8_lossy(bytes).to_string(),
@@ -152,6 +155,25 @@ fn charset_from_content_type(content_type: &str) -> Option<String> {
             None
         }
     })
+}
+
+fn charset_from_meta_tag(bytes: &[u8]) -> Option<String> {
+    let head = String::from_utf8_lossy(&bytes[..bytes.len().min(1024)]).to_ascii_lowercase();
+    let charset_index = head.find("charset")?;
+    let after_charset = &head[charset_index + "charset".len()..];
+    let value_start = after_charset.find('=')? + 1;
+    let value = after_charset[value_start..].trim_start();
+    let value = value.trim_start_matches(['"', '\'']);
+    let charset = value
+        .chars()
+        .take_while(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+        .collect::<String>();
+
+    if charset.is_empty() {
+        None
+    } else {
+        Some(charset)
+    }
 }
 
 fn decode_windows_1252(bytes: &[u8]) -> String {

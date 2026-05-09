@@ -57,6 +57,27 @@ async fn decodes_windows_1252_charset() {
 }
 
 #[tokio::test]
+async fn decodes_charset_declared_by_html_meta_tag() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw(
+                b"<html><head><meta charset=\"windows-1252\"></head><body>caf\xe9</body></html>"
+                    .to_vec(),
+                "text/html",
+            ),
+        )
+        .mount(&server)
+        .await;
+
+    let html = fetch_url(&server.uri().parse().unwrap(), &FetchConfig::default())
+        .await
+        .unwrap();
+
+    assert!(html.body.contains("caf\u{00e9}"));
+}
+
+#[tokio::test]
 async fn rejects_non_html_content_type() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

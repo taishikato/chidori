@@ -276,6 +276,53 @@ This bot-rendered body keeps **Markdown** syntax intact.
 }
 
 #[tokio::test]
+async fn json_debug_records_bot_user_agent_fallback() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/bot-debug"))
+        .and(header("user-agent", DEFAULT_USER_AGENT))
+        .respond_with(html_response(
+            r#"<html><head><title>Bot Debug</title></head><body><div id="app"></div><script>hydrate()</script></body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/bot-debug"))
+        .and(header("user-agent", BOT_USER_AGENT))
+        .respond_with(html_response(
+            r#"
+            <html><head><title>Bot Debug</title></head><body>
+# Bot Debug
+
+This fallback markdown body came from the bot user agent.
+            </body></html>
+            "#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/bot-debug", server.uri()))
+        .arg("--json")
+        .arg("--debug")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["debug"]["extractionPath"], "html");
+    assert_eq!(
+        json["debug"]["fallbacks"],
+        Value::Array(vec![Value::String("bot-user-agent".to_string())])
+    );
+}
+
+#[tokio::test]
 async fn does_not_retry_with_bot_user_agent_when_initial_page_is_extractable() {
     let server = MockServer::start().await;
 
@@ -571,4 +618,140 @@ async fn debug_emits_diagnostics_to_stderr_without_polluting_stdout() {
         .stdout(predicate::str::contains("debug:").not())
         .stderr(predicate::str::contains("debug: fetched"))
         .stderr(predicate::str::contains("debug: extracted"));
+}
+
+#[tokio::test]
+async fn debug_classifies_spa_shell_extraction_failures() {
+    let server = MockServer::start().await;
+    let shell = r#"
+        <html><head><title>Client App</title></head>
+        <body><div id="root"></div><script src="/assets/app.js"></script></body></html>
+    "#;
+    Mock::given(method("GET"))
+        .and(path("/app"))
+        .and(header("user-agent", DEFAULT_USER_AGENT))
+        .respond_with(html_response(shell))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/app"))
+        .and(header("user-agent", BOT_USER_AGENT))
+        .respond_with(html_response(shell))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/app", server.uri()))
+        .arg("--debug")
+        .assert()
+        .failure()
+        .code(7)
+        .stderr(predicate::str::contains(
+            "debug: extraction failed: spa-shell",
+        ));
+}
+
+#[tokio::test]
+async fn json_debug_includes_structured_extraction_diagnostics() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/debug-json"))
+        .respond_with(html_response(
+            r#"
+            <html><head><title>Debug JSON Article</title></head><body>
+              <nav>Menu</nav>
+              <article><h1>Debug JSON Article</h1><p>Debug JSON body.</p></article>
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/debug-json", server.uri()))
+        .arg("--json")
+        .arg("--debug")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["title"], "Debug JSON Article");
+    assert_eq!(json["debug"]["extractionPath"], "html");
+    assert_eq!(json["debug"]["fallbacks"], Value::Array(vec![]));
+    assert!(json["debug"]["wordCount"].as_u64().unwrap() > 0);
+    assert!(json["debug"]["timings"]["totalMs"].as_u64().is_some());
+}
+
+#[tokio::test]
+async fn json_debug_includes_selected_content_candidate_details() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/candidate-debug"))
+        .respond_with(html_response(
+            r#"
+            <html><head><title>Candidate Debug</title></head><body>
+              <main><p>Short shell.</p></main>
+              <article>
+                <h1>Candidate Debug</h1>
+                <p>This article body has enough useful words to win the extraction candidate.</p>
+              </article>
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/candidate-debug", server.uri()))
+        .arg("--json")
+        .arg("--debug")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["debug"]["contentSelector"], "article");
+    assert!(json["debug"]["contentScore"].as_i64().unwrap() > 0);
+}
+
+#[tokio::test]
+async fn json_debug_reports_body_selector_after_low_word_retry() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/body-retry-debug"))
+        .respond_with(html_response(
+            r#"
+            <html><head><title>Body Retry</title></head><body>
+              <article><p>Stub.</p></article>
+              <div class="docs-page">
+                <h1>Recovered Docs</h1>
+                <p>This useful documentation section is recovered by the body retry path.</p>
+                <p>It contains enough words to beat the placeholder article candidate.</p>
+              </div>
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/body-retry-debug", server.uri()))
+        .arg("--json")
+        .arg("--debug")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["debug"]["contentSelector"], "body");
+    assert!(json["markdown"]
+        .as_str()
+        .unwrap()
+        .contains("Recovered Docs"));
 }

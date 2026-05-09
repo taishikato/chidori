@@ -1,6 +1,7 @@
 use crate::error::ChidoriError;
 use crate::fetcher::{fetch_url, FetchConfig, BOT_USER_AGENT, DEFAULT_USER_AGENT};
 use clap::Parser;
+use std::fmt;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use url::Url;
@@ -116,12 +117,18 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
         .clone()
         .unwrap_or_else(|| page.final_url.clone());
     let mut doc = crate::document::ParsedDocument::parse(page.body, document_url);
-    let markdown = match extract_markdown_from_doc(&doc, &config) {
-        Ok(markdown) => markdown,
+    let mut fallback_steps = Vec::new();
+    let extraction = match extract_markdown_from_doc(&doc, &config) {
+        Ok(extraction) => extraction,
         Err(ChidoriError::ExtractionFailed) if config.user_agent.is_none() => {
             if config.debug {
+                eprintln!(
+                    "debug: extraction failed: {}",
+                    classify_extraction_failure(&doc)
+                );
                 eprintln!("debug: retrying with bot user-agent");
             }
+            fallback_steps.push("bot-user-agent".to_string());
             let bot_fetch_config = FetchConfig {
                 user_agent: BOT_USER_AGENT.to_string(),
                 ..fetch_config.clone()
@@ -135,12 +142,20 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
                     let bot_doc =
                         crate::document::ParsedDocument::parse(bot_page.body, bot_document_url);
                     match extract_markdown_from_doc(&bot_doc, &config) {
-                        Ok(markdown) => {
+                        Ok(extraction) => {
                             page.final_url = bot_page.final_url;
                             doc = bot_doc;
-                            markdown
+                            extraction
                         }
-                        Err(_) => return Err(ChidoriError::ExtractionFailed),
+                        Err(_) => {
+                            if config.debug {
+                                eprintln!(
+                                    "debug: extraction failed: {}",
+                                    classify_extraction_failure(&bot_doc)
+                                );
+                            }
+                            return Err(ChidoriError::ExtractionFailed);
+                        }
                     }
                 }
                 Err(_) => return Err(ChidoriError::ExtractionFailed),
@@ -148,6 +163,7 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
         }
         Err(error) => return Err(error),
     };
+    let markdown = extraction.markdown;
 
     let mut metadata = crate::metadata::extract_metadata(&doc);
     metadata.url = config
@@ -175,44 +191,121 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
     } else {
         crate::output::RenderMode::Markdown
     };
-    let rendered = crate::output::render_output(&metadata, &markdown, mode)?;
+    let debug = config.debug.then(|| crate::output::DebugDiagnostics {
+        extraction_path: extraction.path.to_string(),
+        fallbacks: fallback_steps,
+        word_count: metadata.word_count,
+        content_selector: extraction.content_selector.clone(),
+        content_score: extraction.content_score,
+        timings: crate::output::DebugTimings {
+            total_ms: started.elapsed().as_millis(),
+        },
+    });
+    let rendered =
+        crate::output::render_output_with_debug(&metadata, &markdown, mode, debug.as_ref())?;
     crate::output::write_output(config.output.as_deref(), &rendered)
+}
+
+fn classify_extraction_failure(doc: &crate::document::ParsedDocument) -> &'static str {
+    let html = doc.html.to_ascii_lowercase();
+    let text_word_count = doc
+        .dom
+        .root_element()
+        .text()
+        .filter(|text| !text.trim().is_empty())
+        .flat_map(str::split_whitespace)
+        .count();
+
+    let has_app_mount = [
+        "id=\"root\"",
+        "id=\"app\"",
+        "id=\"__next\"",
+        "id=\"svelte\"",
+        "class=\"app\"",
+        "data-reactroot",
+    ]
+    .iter()
+    .any(|marker| html.contains(marker));
+
+    if text_word_count < 10 && has_app_mount && html.contains("<script") {
+        "spa-shell"
+    } else if text_word_count == 0 {
+        "empty-body"
+    } else {
+        "no-main-candidate"
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ExtractionResult {
+    markdown: String,
+    path: ExtractionPath,
+    content_selector: Option<String>,
+    content_score: Option<isize>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ExtractionPath {
+    RawMarkdown,
+    Html,
+}
+
+impl fmt::Display for ExtractionPath {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::RawMarkdown => formatter.write_str("raw-markdown"),
+            Self::Html => formatter.write_str("html"),
+        }
+    }
 }
 
 fn extract_markdown_from_doc(
     doc: &crate::document::ParsedDocument,
     config: &RunConfig,
-) -> Result<String, ChidoriError> {
-    let markdown = if let Some(raw_markdown) = crate::markdown::extract_raw_markdown(&doc.html) {
-        let raw_markdown = if config.no_images {
-            crate::markdown::remove_markdown_images(&raw_markdown)
+) -> Result<ExtractionResult, ChidoriError> {
+    let (markdown, path, content_selector, content_score) =
+        if let Some(raw_markdown) = crate::markdown::extract_raw_markdown(&doc.html) {
+            let raw_markdown = if config.no_images {
+                crate::markdown::remove_markdown_images(&raw_markdown)
+            } else {
+                raw_markdown
+            };
+            let markdown = if let Some(max_chars) = config.max_chars {
+                raw_markdown.chars().take(max_chars).collect()
+            } else {
+                raw_markdown
+            };
+            (markdown, ExtractionPath::RawMarkdown, None, None)
         } else {
-            raw_markdown
+            let content = crate::extractor::extract_main_content(doc)?;
+            let cleaned = crate::cleaner::clean_html(
+                &content.html,
+                &crate::cleaner::CleanOptions {
+                    no_images: config.no_images,
+                },
+            );
+            let markdown = crate::markdown::html_to_markdown(
+                &cleaned,
+                &crate::markdown::MarkdownOptions {
+                    max_chars: config.max_chars,
+                },
+            );
+            (
+                markdown,
+                ExtractionPath::Html,
+                content.selector,
+                content.score,
+            )
         };
-        if let Some(max_chars) = config.max_chars {
-            raw_markdown.chars().take(max_chars).collect()
-        } else {
-            raw_markdown
-        }
-    } else {
-        let main_html = crate::extractor::extract_main_html(doc)?;
-        let cleaned = crate::cleaner::clean_html(
-            &main_html,
-            &crate::cleaner::CleanOptions {
-                no_images: config.no_images,
-            },
-        );
-        crate::markdown::html_to_markdown(
-            &cleaned,
-            &crate::markdown::MarkdownOptions {
-                max_chars: config.max_chars,
-            },
-        )
-    };
 
     if markdown.trim().is_empty() {
         Err(ChidoriError::ExtractionFailed)
     } else {
-        Ok(markdown)
+        Ok(ExtractionResult {
+            markdown,
+            path,
+            content_selector,
+            content_score,
+        })
     }
 }
