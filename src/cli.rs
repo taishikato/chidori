@@ -2,8 +2,10 @@ use crate::error::ChidoriError;
 use crate::fetcher::{fetch_url, FetchConfig, BOT_USER_AGENT, DEFAULT_USER_AGENT};
 use clap::{Parser, ValueEnum};
 use std::fmt;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::thread;
 use std::time::{Duration, Instant};
 use url::Url;
 
@@ -152,16 +154,18 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
                 if config.debug {
                     eprintln!("debug: retrying with external renderer");
                 }
-                match render_with_external_command(&config.url).and_then(|rendered_html| {
-                    let rendered_url = config
-                        .source_url
-                        .clone()
-                        .unwrap_or_else(|| page.final_url.clone());
-                    let rendered_doc =
-                        crate::document::ParsedDocument::parse(rendered_html, rendered_url);
-                    extract_markdown_from_doc(&rendered_doc, &config)
-                        .map(|extraction| (rendered_doc, extraction))
-                }) {
+                match render_with_external_command(&config.url, fetch_config.timeout).and_then(
+                    |rendered_html| {
+                        let rendered_url = config
+                            .source_url
+                            .clone()
+                            .unwrap_or_else(|| page.final_url.clone());
+                        let rendered_doc =
+                            crate::document::ParsedDocument::parse(rendered_html, rendered_url);
+                        extract_markdown_from_doc(&rendered_doc, &config)
+                            .map(|extraction| (rendered_doc, extraction))
+                    },
+                ) {
                     Ok((rendered_doc, extraction)) => {
                         fallback_steps.push("external-renderer".to_string());
                         doc = rendered_doc;
@@ -280,27 +284,62 @@ async fn retry_with_bot_user_agent(
     }
 }
 
-fn render_with_external_command(url: &Url) -> Result<String, ChidoriError> {
+fn render_with_external_command(url: &Url, timeout: Duration) -> Result<String, ChidoriError> {
     let command = std::env::var("CHIDORI_RENDER_COMMAND").map_err(|_| {
         ChidoriError::FetchFailed(
             "CHIDORI_RENDER_COMMAND is required when --render=auto is used".to_string(),
         )
     })?;
     let (program, args) = render_command_parts(&command)?;
-    let output = Command::new(&program)
+    let mut child = Command::new(&program)
         .args(args)
         .arg(url.as_str())
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| ChidoriError::FetchFailed(error.to_string()))?;
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| ChidoriError::FetchFailed("renderer stdout unavailable".to_string()))?;
+    let stdout_reader = thread::spawn(move || {
+        let mut output = Vec::new();
+        stdout.read_to_end(&mut output).map(|_| output)
+    });
+    let started = Instant::now();
+
+    let status = loop {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| ChidoriError::FetchFailed(error.to_string()))?
+        {
+            break status;
+        }
+
+        if started.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = stdout_reader.join();
+            return Err(ChidoriError::Timeout(timeout.as_millis() as u64));
+        }
+
+        let remaining = timeout.saturating_sub(started.elapsed());
+        thread::sleep(remaining.min(Duration::from_millis(10)));
+    };
+
+    let stdout = stdout_reader
+        .join()
+        .map_err(|_| ChidoriError::FetchFailed("renderer stdout reader panicked".to_string()))?
         .map_err(|error| ChidoriError::FetchFailed(error.to_string()))?;
 
-    if !output.status.success() {
+    if !status.success() {
         return Err(ChidoriError::FetchFailed(format!(
             "renderer exited with status {}",
-            output.status
+            status
         )));
     }
 
-    String::from_utf8(output.stdout)
+    String::from_utf8(stdout)
         .map_err(|error| ChidoriError::FetchFailed(format!("renderer returned non-UTF-8: {error}")))
 }
 

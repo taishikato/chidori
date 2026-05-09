@@ -3,7 +3,7 @@ use chidori::fetcher::{BOT_USER_AGENT, DEFAULT_USER_AGENT};
 use predicates::prelude::*;
 use serde_json::Value;
 use std::os::unix::fs::PermissionsExt;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tempfile::tempdir;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -932,6 +932,53 @@ HTML
         .stdout(predicate::str::contains(
             "Literal renderer path was preserved.",
         ));
+}
+
+#[tokio::test]
+async fn render_auto_times_out_external_renderer() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/slow-renderer"))
+        .and(header("user-agent", "ChidoriTest/2.0"))
+        .respond_with(html_response(
+            r#"<html><body><div id="root"></div><script>hydrate()</script></body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let dir = tempdir().unwrap();
+    let renderer = dir.path().join("slow-renderer.sh");
+    std::fs::write(
+        &renderer,
+        r#"#!/bin/sh
+sleep 2
+cat <<'HTML'
+<html><body><article><h1>Late Rendered Article</h1><p>This should arrive too late.</p></article></body></html>
+HTML
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&renderer).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&renderer, permissions).unwrap();
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let started = Instant::now();
+    cmd.arg(format!("{}/slow-renderer", server.uri()))
+        .arg("--render=auto")
+        .arg("--timeout")
+        .arg("50")
+        .arg("--user-agent")
+        .arg("ChidoriTest/2.0")
+        .env("CHIDORI_RENDER_COMMAND", &renderer)
+        .assert()
+        .failure()
+        .code(4)
+        .stderr(predicate::str::contains(
+            "timed out fetching page after 50 ms",
+        ));
+    assert!(started.elapsed() < Duration::from_millis(1500));
 }
 
 #[tokio::test]
