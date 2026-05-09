@@ -17,7 +17,6 @@
     "format": "cargo fmt --all",
     "format:check": "cargo fmt --all -- --check",
     "lint": "cargo clippy --all-targets --all-features -- -D warnings",
-    "parity:local": "node tools/parity-harness.mjs",
     "precommit": "npm run format:check && npm run lint",
     "test": "cargo test",
     "install": "cargo build --release",

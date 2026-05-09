@@ -8,8 +8,6 @@ use url::Url;
 
 pub const DEFAULT_USER_AGENT: &str =
     "Mozilla/5.0 (compatible; Chidori/0.1; +https://github.com/taishi/chidori)";
-pub const BOT_USER_AGENT: &str =
-    "Mozilla/5.0 (compatible; Chidori/0.1; +https://github.com/taishi/chidori) bot";
 
 #[derive(Debug, Clone)]
 pub struct FetchConfig {
