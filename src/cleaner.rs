@@ -44,13 +44,11 @@ fn remove_navigation_like_blocks(html: &str) -> String {
 }
 
 fn is_navigation_like_opening_tag(opening_tag: &str) -> bool {
-    let normalized = opening_tag.to_ascii_lowercase();
-    normalized.contains("data-block=\"nav\"")
-        || normalized.contains("data-block='nav'")
-        || has_class_token(&normalized, "breadcrumb")
-        || has_class_token(&normalized, "breadcrumbs")
-        || has_class_token(&normalized, "toc")
-        || has_class_token(&normalized, "toc-panel")
+    attribute_value_eq(opening_tag, "data-block", "nav")
+        || has_class_token(opening_tag, "breadcrumb")
+        || has_class_token(opening_tag, "breadcrumbs")
+        || has_class_token(opening_tag, "toc")
+        || has_class_token(opening_tag, "toc-panel")
 }
 
 fn remove_fragment_only_link_lists(html: &str) -> String {

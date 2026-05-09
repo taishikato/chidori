@@ -2,10 +2,11 @@
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
-import { basename, resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
-const root = resolve(new URL('..', import.meta.url).pathname);
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const corpusPath = resolve(root, 'tools/parity-corpus.json');
 const reportDir = resolve(root, 'reports/parity');
 const reportJsonPath = resolve(root, 'reports/parity/latest.json');
@@ -13,6 +14,8 @@ const reportMdPath = resolve(root, 'reports/parity/latest.md');
 const referenceProjectDir = `def${'uddle'}`;
 const referenceRoot = resolve(root, 'opensrc', referenceProjectDir);
 const referenceCli = resolve(referenceRoot, 'dist/cli.js');
+const binaryExt = process.platform === 'win32' ? '.exe' : '';
+const chidoriCli = resolve(root, 'target', 'debug', `chidori${binaryExt}`);
 
 function parseArgs() {
   const args = new Set(process.argv.slice(2));
@@ -152,7 +155,7 @@ async function ensureBinaries(options) {
 
 async function runCase(testCase, baseUrl) {
   const url = `${baseUrl}/fixture?fixture=${encodeURIComponent(testCase.fixture)}&source=${encodeURIComponent(testCase.sourceUrl)}`;
-  const chidori = await run(resolve(root, 'target/debug/chidori'), [
+  const chidori = await run(chidoriCli, [
     url,
     '--json',
     '--source-url',
@@ -167,15 +170,25 @@ async function runCase(testCase, baseUrl) {
   let chidoriMetadata = {};
   let referenceMarkdown = '';
   let referenceMetadata = {};
+  let chidoriParseError = '';
+  let referenceParseError = '';
   if (chidori.status === 0) {
-    const parsed = JSON.parse(chidori.stdout);
-    chidoriMarkdown = parsed.markdown ?? '';
-    chidoriMetadata = parsed.metadata ?? parsed;
+    try {
+      const parsed = JSON.parse(chidori.stdout);
+      chidoriMarkdown = parsed.markdown ?? '';
+      chidoriMetadata = parsed.metadata ?? parsed;
+    } catch (error) {
+      chidoriParseError = error instanceof Error ? error.message : String(error);
+    }
   }
   if (reference.status === 0) {
-    const parsed = JSON.parse(reference.stdout);
-    referenceMarkdown = parsed.contentMarkdown ?? parsed.content ?? '';
-    referenceMetadata = parsed;
+    try {
+      const parsed = JSON.parse(reference.stdout);
+      referenceMarkdown = parsed.contentMarkdown ?? parsed.content ?? '';
+      referenceMetadata = parsed;
+    } catch (error) {
+      referenceParseError = error instanceof Error ? error.message : String(error);
+    }
   }
 
   const expected = testCase.expected ?? [];
@@ -183,10 +196,12 @@ async function runCase(testCase, baseUrl) {
   const chidoriExpectation = expectationStatus(chidoriMarkdown, expected, rejected);
   const referenceExpectation = expectationStatus(referenceMarkdown, expected, rejected);
   const similarity = jaccard(chidoriMarkdown, referenceMarkdown);
+  const chidoriErrored = chidori.status !== 0 || chidoriParseError !== '';
+  const referenceErrored = reference.status !== 0 || referenceParseError !== '';
   const status =
-    chidori.status !== 0
+    chidoriErrored
       ? 'chidori-error'
-      : reference.status !== 0
+      : referenceErrored
         ? 'reference-error'
         : chidoriExpectation.ok && !referenceExpectation.ok
           ? 'chidori-better'
@@ -232,8 +247,18 @@ async function runCase(testCase, baseUrl) {
       },
     },
     commands: {
-      chidori: { status: chidori.status, elapsedMs: Math.round(chidori.elapsedMs), stderr: chidori.stderr.trim() },
-      reference: { status: reference.status, elapsedMs: Math.round(reference.elapsedMs), stderr: reference.stderr.trim() },
+      chidori: {
+        status: chidori.status,
+        elapsedMs: Math.round(chidori.elapsedMs),
+        stderr: chidori.stderr.trim(),
+        parseError: chidoriParseError,
+      },
+      reference: {
+        status: reference.status,
+        elapsedMs: Math.round(reference.elapsedMs),
+        stderr: reference.stderr.trim(),
+        parseError: referenceParseError,
+      },
     },
   };
 }

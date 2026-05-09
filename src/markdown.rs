@@ -225,11 +225,9 @@ impl SpecializedHtml {
                 .or_else(|| attr_value(opening_tag, "alttext"))
                 .or_else(|| annotation_latex(inner_html))
                 .unwrap_or_else(|| text_from_html(inner_html));
-            let replacement = if opening_tag
-                .to_ascii_lowercase()
-                .contains("display=\"block\"")
-                || opening_tag.to_ascii_lowercase().contains("display='block'")
-            {
+            let is_block = attr_value(opening_tag, "display")
+                .is_some_and(|display| display.trim().eq_ignore_ascii_case("block"));
+            let replacement = if is_block {
                 format!("\n$$\n{}\n$$\n", latex.trim())
             } else {
                 format!("${}$", latex.trim())

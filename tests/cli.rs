@@ -239,6 +239,7 @@ async fn retries_with_bot_user_agent_when_initial_page_has_no_extractable_conten
         .respond_with(html_response(
             r#"<html><head><title>Bot Markdown</title></head><body><div id="app"></div><script>hydrate()</script></body></html>"#,
         ))
+        .expect(1)
         .mount(&server)
         .await;
 
@@ -257,6 +258,7 @@ This bot-rendered body keeps **Markdown** syntax intact.
             </body></html>
             "#,
         ))
+        .expect(1)
         .mount(&server)
         .await;
 

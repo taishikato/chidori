@@ -506,8 +506,8 @@ fn mastodon_status_thread_candidate(doc: &ParsedDocument) -> Result<Option<Strin
     };
     let Some(thread) = doc.dom.select(&selectors.threads).find(|candidate| {
         candidate
-            .html()
-            .contains(&format!("data-id=\"{status_id}\""))
+            .select(&selectors.statuses)
+            .any(|status| status.value().attr("data-id") == Some(status_id.as_str()))
     }) else {
         return Ok(None);
     };
@@ -544,11 +544,12 @@ fn is_mastodon_status_path(doc: &ParsedDocument) -> bool {
         return false;
     };
 
-    (host == "mastodon.social" || host.ends_with(".mastodon.social"))
+    host.contains('.')
         && doc.url.path_segments().is_some_and(|segments| {
             let segments: Vec<_> = segments.collect();
             segments.len() >= 2
                 && segments[0].starts_with('@')
+                && segments[0].len() > 1
                 && segments[1]
                     .chars()
                     .all(|character| character.is_ascii_digit())
@@ -1370,5 +1371,45 @@ mod tests {
         assert!(html.contains("Right status body."));
         assert!(!html.contains("Wrong Bird"));
         assert!(!html.contains("Wrong status body."));
+    }
+
+    #[test]
+    fn mastodon_status_path_accepts_federated_instances() {
+        assert!(is_mastodon_status_path(&parse_doc_with_url(
+            "https://example.social/@alice/112233445566778899"
+        )));
+        assert!(!is_mastodon_status_path(&parse_doc_with_url(
+            "https://example.social/alice/112233445566778899"
+        )));
+        assert!(!is_mastodon_status_path(&parse_doc_with_url(
+            "https://example.social/@alice/not-a-number"
+        )));
+    }
+
+    #[test]
+    fn mastodon_thread_matching_accepts_single_quoted_status_id() {
+        let doc = parse_doc(
+            r#"
+            <section class="status-thread">
+              <article class="status" data-id='112233445566778899'>
+                <a class="status__display-name">
+                  <strong>Alice Example</strong>
+                  <span>@alice@example.social</span>
+                </a>
+                <time>May 8, 2026</time>
+                <div class="status__content">
+                  <p>Single quoted status id should match.</p>
+                </div>
+              </article>
+            </section>
+            "#,
+            "https://example.social/@alice/112233445566778899",
+        );
+
+        let html = mastodon_status_thread_candidate(&doc).unwrap().unwrap();
+
+        assert!(html.contains("Alice Example"));
+        assert!(html.contains("@alice@example.social"));
+        assert!(html.contains("Single quoted status id should match."));
     }
 }

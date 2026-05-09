@@ -758,6 +758,7 @@ fn converts_special_elements_with_whitespace_around_attribute_equals() {
     let html = r##"
     <article>
       <p>Inline acceleration uses <math data-latex = "a=b^2"></math> in prose.</p>
+      <math display = "block" data-latex = "x=y^2"></math>
       <div class = "callout" data-callout = "note">
         <div class="callout-title-inner">Heads up</div>
         <div class="callout-content"><p>Whitespace in attributes should be fine.</p></div>
@@ -769,6 +770,7 @@ fn converts_special_elements_with_whitespace_around_attribute_equals() {
     let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
 
     assert!(markdown.contains("Inline acceleration uses $a=b^2$ in prose."));
+    assert!(markdown.contains("$$\nx=y^2\n$$"));
     assert!(markdown.contains("> [!note] Heads up"));
     assert!(markdown.contains("> Whitespace in attributes should be fine."));
     assert!(markdown.contains("cited claims[^1] readable."));
@@ -875,6 +877,23 @@ fn removes_breadcrumb_blocks_without_semantic_nav_tags() {
     let cleaned = clean_html(html, &CleanOptions { no_images: false });
 
     assert!(cleaned.contains("Not a shadowing day"));
+    assert!(!cleaned.contains("Home"));
+    assert!(!cleaned.contains("Posts"));
+}
+
+#[test]
+fn removes_navigation_blocks_with_spaced_data_block_attribute() {
+    let html = r#"
+    <main>
+      <div data-block = "nav">
+        <ul><li><a href="/">Home</a></li><li><a href="/archive">Posts</a></li></ul>
+      </div>
+      <p>Visible paragraph survives.</p>
+    </main>"#;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+
+    assert!(cleaned.contains("Visible paragraph survives."));
     assert!(!cleaned.contains("Home"));
     assert!(!cleaned.contains("Posts"));
 }
