@@ -751,36 +751,88 @@ fn largest_srcset_candidate(srcset: &str) -> Option<&str> {
 }
 
 fn replace_attr_value(opening_tag: &str, name: &str, value: &str) -> String {
-    let mut output = String::with_capacity(opening_tag.len() + value.len());
-    let mut rest = opening_tag;
-    let pattern = format!("{name}=");
+    let Some((value_start, value_end)) = attr_value_range(opening_tag, name) else {
+        return opening_tag.to_string();
+    };
 
-    if let Some(index) = rest.to_ascii_lowercase().find(&pattern) {
-        output.push_str(&rest[..index + pattern.len()]);
-        let value_start = index + pattern.len();
-        let after_equals = &rest[value_start..];
-        let Some(quote) = after_equals
+    let mut output = String::with_capacity(opening_tag.len() + value.len());
+    output.push_str(&opening_tag[..value_start]);
+    output.push_str(&html_escape::encode_double_quoted_attribute(value));
+    output.push_str(&opening_tag[value_end..]);
+    output
+}
+
+fn attr_value_range(opening_tag: &str, expected: &str) -> Option<(usize, usize)> {
+    let tag_offset = usize::from(opening_tag.starts_with('<'));
+    let input = &opening_tag[tag_offset..];
+    let input = input.trim_start();
+    let input_offset = tag_offset + opening_tag[tag_offset..].len() - input.len();
+    let name_end = input
+        .find(|ch: char| ch.is_ascii_whitespace() || ch == '/')
+        .unwrap_or(input.len());
+    let mut offset = input_offset + name_end;
+
+    while offset < opening_tag.len() {
+        let rest = &opening_tag[offset..];
+        let trimmed = rest.trim_start();
+        offset += rest.len() - trimmed.len();
+        if trimmed.is_empty() || trimmed.starts_with('/') || trimmed.starts_with('>') {
+            return None;
+        }
+
+        let name_end = trimmed
+            .find(|ch: char| ch.is_ascii_whitespace() || ch == '=' || ch == '/' || ch == '>')
+            .unwrap_or(trimmed.len());
+        if name_end == 0 {
+            offset += trimmed.chars().next()?.len_utf8();
+            continue;
+        }
+
+        let attr_name = &trimmed[..name_end];
+        offset += name_end;
+        let rest = &opening_tag[offset..];
+        let trimmed = rest.trim_start();
+        offset += rest.len() - trimmed.len();
+        if !trimmed.starts_with('=') {
+            continue;
+        }
+
+        offset += '='.len_utf8();
+        let rest = &opening_tag[offset..];
+        let trimmed = rest.trim_start();
+        offset += rest.len() - trimmed.len();
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        let value_start;
+        let value_end;
+        if let Some(quote) = trimmed
             .chars()
             .next()
             .filter(|quote| matches!(quote, '"' | '\''))
-        else {
-            output.push_str(value);
-            output.push_str(after_equals);
-            return output;
-        };
-        output.push(quote);
-        output.push_str(&html_escape::encode_double_quoted_attribute(value));
-        let after_quote = &after_equals[quote.len_utf8()..];
-        if let Some(end) = after_quote.find(quote) {
-            rest = &after_quote[end..];
+        {
+            value_start = offset + quote.len_utf8();
+            let value = &opening_tag[value_start..];
+            let end = value.find(quote)?;
+            value_end = value_start + end;
+            offset = value_end + quote.len_utf8();
         } else {
-            return output;
+            value_start = offset;
+            let value = &opening_tag[value_start..];
+            let end = value
+                .find(|ch: char| ch.is_ascii_whitespace() || ch == '/' || ch == '>')
+                .unwrap_or(value.len());
+            value_end = value_start + end;
+            offset = value_end;
         }
-        output.push_str(rest);
-        return output;
+
+        if attr_name.eq_ignore_ascii_case(expected) {
+            return Some((value_start, value_end));
+        }
     }
 
-    opening_tag.to_string()
+    None
 }
 
 fn opening_tag_end(input: &str) -> Option<usize> {

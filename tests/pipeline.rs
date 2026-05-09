@@ -1229,6 +1229,18 @@ fn prefers_largest_srcset_image_when_quoted_attribute_contains_greater_than() {
 }
 
 #[test]
+fn prefers_largest_srcset_image_without_rewriting_data_src() {
+    let html = r#"
+    <article>
+      <img data-src="/lazy.png" src="/small.png" srcset="/small.png 320w, /large.png 1200w" alt="Lazy diagram">
+    </article>
+    "#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("![Lazy diagram](/large.png)"));
+}
+
+#[test]
 fn removes_picture_when_images_disabled() {
     let html = r#"
     <article>
