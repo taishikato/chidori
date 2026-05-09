@@ -351,7 +351,7 @@ impl SpecializedHtml {
         while let Some(index) = rest.find("<img") {
             output.push_str(&rest[..index]);
             let candidate = &rest[index..];
-            let Some(open_end) = candidate.find('>') else {
+            let Some(open_end) = opening_tag_end(candidate) else {
                 output.push_str(candidate);
                 self.html = output;
                 return;
@@ -781,6 +781,22 @@ fn replace_attr_value(opening_tag: &str, name: &str, value: &str) -> String {
     }
 
     opening_tag.to_string()
+}
+
+fn opening_tag_end(input: &str) -> Option<usize> {
+    let mut quote: Option<char> = None;
+
+    for (index, character) in input.char_indices() {
+        match quote {
+            Some(current) if character == current => quote = None,
+            Some(_) => {}
+            None if character == '"' || character == '\'' => quote = Some(character),
+            None if character == '>' => return Some(index),
+            None => {}
+        }
+    }
+
+    None
 }
 
 fn opening_attribute_values<'a>(

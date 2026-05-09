@@ -1217,6 +1217,18 @@ fn preserves_figure_captions_and_prefers_largest_srcset_image() {
 }
 
 #[test]
+fn prefers_largest_srcset_image_when_quoted_attribute_contains_greater_than() {
+    let html = r#"
+    <article>
+      <img src="/small.png" alt="2 > 1 diagram" srcset="/small.png 320w, /large.png 1200w">
+    </article>
+    "#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("![2 > 1 diagram](/large.png)"));
+}
+
+#[test]
 fn removes_picture_when_images_disabled() {
     let html = r#"
     <article>

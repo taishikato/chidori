@@ -253,6 +253,7 @@ dependencies = [
  "scraper",
  "serde",
  "serde_json",
+ "shlex",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",

@@ -2,7 +2,7 @@ use crate::error::ChidoriError;
 use crate::fetcher::{fetch_url, FetchConfig, BOT_USER_AGENT, DEFAULT_USER_AGENT};
 use clap::{Parser, ValueEnum};
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 use url::Url;
@@ -286,7 +286,9 @@ fn render_with_external_command(url: &Url) -> Result<String, ChidoriError> {
             "CHIDORI_RENDER_COMMAND is required when --render=auto is used".to_string(),
         )
     })?;
-    let output = Command::new(&command)
+    let (program, args) = render_command_parts(&command)?;
+    let output = Command::new(&program)
+        .args(args)
         .arg(url.as_str())
         .output()
         .map_err(|error| ChidoriError::FetchFailed(error.to_string()))?;
@@ -300,6 +302,23 @@ fn render_with_external_command(url: &Url) -> Result<String, ChidoriError> {
 
     String::from_utf8(output.stdout)
         .map_err(|error| ChidoriError::FetchFailed(format!("renderer returned non-UTF-8: {error}")))
+}
+
+fn render_command_parts(command: &str) -> Result<(String, Vec<String>), ChidoriError> {
+    if Path::new(command).exists() {
+        return Ok((command.to_string(), Vec::new()));
+    }
+
+    let mut command_parts = shlex::split(command)
+        .filter(|parts| !parts.is_empty())
+        .ok_or_else(|| ChidoriError::FetchFailed("invalid CHIDORI_RENDER_COMMAND".to_string()))?
+        .into_iter();
+    let program = command_parts
+        .next()
+        .ok_or_else(|| ChidoriError::FetchFailed("invalid CHIDORI_RENDER_COMMAND".to_string()))?;
+    let args = command_parts.collect::<Vec<_>>();
+
+    Ok((program, args))
 }
 
 fn classify_extraction_failure(doc: &crate::document::ParsedDocument) -> &'static str {

@@ -805,6 +805,94 @@ HTML
 }
 
 #[tokio::test]
+async fn render_auto_allows_renderer_command_arguments() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/spa-with-render-args"))
+        .and(header("user-agent", DEFAULT_USER_AGENT))
+        .respond_with(html_response(
+            r#"<html><body><div id="root"></div><script>hydrate()</script></body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let dir = tempdir().unwrap();
+    let renderer = dir.path().join("renderer.sh");
+    std::fs::write(
+        &renderer,
+        r#"#!/bin/sh
+if [ "$1" != "--fixture" ] || [ "$2" != "rendered" ]; then
+  exit 2
+fi
+cat <<'HTML'
+<html><body><article><h1>Rendered With Args</h1><p>Renderer arguments were preserved.</p></article></body></html>
+HTML
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&renderer).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&renderer, permissions).unwrap();
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/spa-with-render-args", server.uri()))
+        .arg("--render=auto")
+        .env(
+            "CHIDORI_RENDER_COMMAND",
+            format!("{} --fixture rendered", renderer.display()),
+        )
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Rendered With Args"))
+        .stdout(predicate::str::contains(
+            "Renderer arguments were preserved.",
+        ));
+}
+
+#[tokio::test]
+async fn render_auto_preserves_literal_renderer_paths_with_spaces() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/spa-with-space-path-renderer"))
+        .and(header("user-agent", DEFAULT_USER_AGENT))
+        .respond_with(html_response(
+            r#"<html><body><div id="root"></div><script>hydrate()</script></body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let dir = tempdir().unwrap();
+    let renderer_dir = dir.path().join("renderer dir");
+    std::fs::create_dir(&renderer_dir).unwrap();
+    let renderer = renderer_dir.join("renderer.sh");
+    std::fs::write(
+        &renderer,
+        r#"#!/bin/sh
+cat <<'HTML'
+<html><body><article><h1>Rendered Space Path</h1><p>Literal renderer path was preserved.</p></article></body></html>
+HTML
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&renderer).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&renderer, permissions).unwrap();
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/spa-with-space-path-renderer", server.uri()))
+        .arg("--render=auto")
+        .env("CHIDORI_RENDER_COMMAND", &renderer)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Rendered Space Path"))
+        .stdout(predicate::str::contains(
+            "Literal renderer path was preserved.",
+        ));
+}
+
+#[tokio::test]
 async fn render_auto_falls_back_to_bot_user_agent_when_renderer_is_unavailable() {
     let server = MockServer::start().await;
 
