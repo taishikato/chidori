@@ -10,6 +10,12 @@ npx chidori-fetch https://example.com
 
 `chidori` fetches a URL, extracts the main readable content, removes page noise, and prints Markdown to stdout by default. Logs and errors go to stderr so AI agents and shell scripts can safely pipe stdout into prompts, files, or other tools.
 
+## Installation
+
+```bash
+npm install -g chidori-fetch
+```
+
 ## Usage
 
 ```bash
@@ -24,7 +30,3 @@ chidori https://example.com --no-images
 ## Why
 
 AI agents need web pages as clean, pipeable Markdown. `chidori` is built in Rust for fast CLI startup and predictable shell behavior in automated workflows.
-
-## Status
-
-This project is an MVP. It focuses on URL input, Markdown output, metadata JSON, and generic content extraction.
