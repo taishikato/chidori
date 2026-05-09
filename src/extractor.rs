@@ -293,8 +293,10 @@ fn repository_discussion_candidate(doc: &ParsedDocument) -> Result<Option<String
         return Ok(None);
     }
 
-    let title_selector =
-        Selector::parse("bdi, h1").map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let title_selector = Selector::parse(
+        r#"[data-testid="issue-title"], .js-issue-title, bdi.markdown-title, h1 bdi"#,
+    )
+    .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
     let body_selector = Selector::parse(".markdown-body")
         .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
     let comment_selector = Selector::parse(".timeline-comment, [data-testid=\"issue-comment\"]")

@@ -238,9 +238,10 @@ async fn source_url_extracts_repository_issue_discussion() {
         .respond_with(html_response(
             r#"
             <html><body>
+              <h1 id="search-suggestions-dialog-header">Search code, repositories, users, issues, pull requests...</h1>
               <aside>Repository sidebar noise</aside>
               <main>
-                <bdi>Improve parser diagnostics</bdi>
+                <h1><bdi data-testid="issue-title">Improve parser diagnostics</bdi></h1>
                 <div class="markdown-body"><p>Issue body with useful reproduction details.</p></div>
                 <div class="timeline-comment">
                   <a class="author">alice</a>
@@ -260,6 +261,7 @@ async fn source_url_extracts_repository_issue_discussion() {
         .assert()
         .success()
         .stdout(predicate::str::contains("# Improve parser diagnostics"))
+        .stdout(predicate::str::contains("Search code, repositories").not())
         .stdout(predicate::str::contains(
             "Issue body with useful reproduction details.",
         ))
