@@ -739,15 +739,23 @@ fn largest_srcset_candidate(srcset: &str) -> Option<&str> {
         .filter_map(|candidate| {
             let mut parts = candidate.split_whitespace();
             let url = parts.next()?;
-            let width = parts
-                .next()
-                .and_then(|descriptor| descriptor.strip_suffix('w'))
-                .and_then(|width| width.parse::<usize>().ok())
-                .unwrap_or(0);
-            Some((width, url))
+            let descriptor_score = parts.next().and_then(srcset_descriptor_score).unwrap_or(0);
+            Some((descriptor_score, url))
         })
-        .max_by_key(|(width, _url)| *width)
-        .map(|(_width, url)| url)
+        .max_by_key(|(descriptor_score, _url)| *descriptor_score)
+        .map(|(_descriptor_score, url)| url)
+}
+
+fn srcset_descriptor_score(descriptor: &str) -> Option<usize> {
+    descriptor
+        .strip_suffix('w')
+        .and_then(|width| width.parse::<usize>().ok())
+        .or_else(|| {
+            descriptor.strip_suffix('x').and_then(|density| {
+                let density = density.parse::<f64>().ok()?;
+                density.is_finite().then_some((density * 1000.0) as usize)
+            })
+        })
 }
 
 fn replace_attr_value(opening_tag: &str, name: &str, value: &str) -> String {

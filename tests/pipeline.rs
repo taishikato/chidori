@@ -1296,6 +1296,18 @@ fn prefers_largest_srcset_image_without_rewriting_data_src() {
 }
 
 #[test]
+fn prefers_highest_density_srcset_image() {
+    let html = r#"
+    <article>
+      <img src="/fallback.png" srcset="/large.png 2x, /small.png 1x" alt="Density diagram">
+    </article>
+    "#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("![Density diagram](/large.png)"));
+}
+
+#[test]
 fn removes_picture_when_images_disabled() {
     let html = r#"
     <article>
