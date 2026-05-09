@@ -2,6 +2,7 @@ use assert_cmd::Command;
 use chidori::fetcher::{BOT_USER_AGENT, DEFAULT_USER_AGENT};
 use predicates::prelude::*;
 use serde_json::Value;
+use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
 use tempfile::tempdir;
 use wiremock::matchers::{header, method, path};
@@ -690,6 +691,44 @@ async fn debug_classifies_spa_shell_extraction_failures() {
         .stderr(predicate::str::contains(
             "debug: extraction failed: spa-shell",
         ));
+}
+
+#[tokio::test]
+async fn render_auto_uses_external_renderer_after_static_extraction_fails() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/spa"))
+        .and(header("user-agent", DEFAULT_USER_AGENT))
+        .respond_with(html_response(
+            r#"<html><body><div id="root"></div><script>hydrate()</script></body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let dir = tempdir().unwrap();
+    let renderer = dir.path().join("renderer.sh");
+    std::fs::write(
+        &renderer,
+        r#"#!/bin/sh
+cat <<'HTML'
+<html><body><article><h1>Rendered Article</h1><p>Hydrated content from renderer.</p></article></body></html>
+HTML
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&renderer).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&renderer, permissions).unwrap();
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/spa", server.uri()))
+        .arg("--render=auto")
+        .env("CHIDORI_RENDER_COMMAND", &renderer)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Rendered Article"))
+        .stdout(predicate::str::contains("Hydrated content from renderer."));
 }
 
 #[tokio::test]

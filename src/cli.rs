@@ -1,8 +1,9 @@
 use crate::error::ChidoriError;
 use crate::fetcher::{fetch_url, FetchConfig, BOT_USER_AGENT, DEFAULT_USER_AGENT};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use std::fmt;
 use std::path::PathBuf;
+use std::process::Command;
 use std::time::{Duration, Instant};
 use url::Url;
 
@@ -42,6 +43,9 @@ pub struct Cli {
     #[arg(long, help = "Emit extraction diagnostics and timing information")]
     pub debug: bool,
 
+    #[arg(long, value_enum, default_value_t = RenderFallback::Off, help = "Use optional external rendering fallback")]
+    pub render: RenderFallback,
+
     #[arg(long, hide = true, help = "Override document URL after fetching")]
     pub source_url: Option<String>,
 }
@@ -57,7 +61,14 @@ pub struct RunConfig {
     pub lang: Option<String>,
     pub no_images: bool,
     pub debug: bool,
+    pub render: RenderFallback,
     pub source_url: Option<Url>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum RenderFallback {
+    Off,
+    Auto,
 }
 
 impl TryFrom<Cli> for RunConfig {
@@ -86,6 +97,7 @@ impl TryFrom<Cli> for RunConfig {
             lang: cli.lang,
             no_images: cli.no_images,
             debug: cli.debug,
+            render: cli.render,
             source_url,
         })
     }
@@ -128,6 +140,26 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
     let mut fallback_steps = Vec::new();
     let extraction = match extract_markdown_from_doc(&doc, &config) {
         Ok(extraction) => extraction,
+        Err(ChidoriError::ExtractionFailed) if config.render == RenderFallback::Auto => {
+            if config.debug {
+                eprintln!(
+                    "debug: extraction failed: {}",
+                    classify_extraction_failure(&doc)
+                );
+                eprintln!("debug: retrying with external renderer");
+            }
+            fallback_steps.push("external-renderer".to_string());
+            let rendered_html = render_with_external_command(&config.url)?;
+            let rendered_url = config
+                .source_url
+                .clone()
+                .unwrap_or_else(|| page.final_url.clone());
+            doc = crate::document::ParsedDocument::parse(rendered_html, rendered_url);
+            match extract_markdown_from_doc(&doc, &config) {
+                Ok(extraction) => extraction,
+                Err(error) => return Err(error),
+            }
+        }
         Err(ChidoriError::ExtractionFailed) if config.user_agent.is_none() => {
             if config.debug {
                 eprintln!(
@@ -214,6 +246,28 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
     let rendered =
         crate::output::render_output_with_debug(&metadata, &markdown, mode, debug.as_ref())?;
     crate::output::write_output(config.output.as_deref(), &rendered)
+}
+
+fn render_with_external_command(url: &Url) -> Result<String, ChidoriError> {
+    let command = std::env::var("CHIDORI_RENDER_COMMAND").map_err(|_| {
+        ChidoriError::FetchFailed(
+            "CHIDORI_RENDER_COMMAND is required when --render=auto is used".to_string(),
+        )
+    })?;
+    let output = Command::new(&command)
+        .arg(url.as_str())
+        .output()
+        .map_err(|error| ChidoriError::FetchFailed(error.to_string()))?;
+
+    if !output.status.success() {
+        return Err(ChidoriError::FetchFailed(format!(
+            "renderer exited with status {}",
+            output.status
+        )));
+    }
+
+    String::from_utf8(output.stdout)
+        .map_err(|error| ChidoriError::FetchFailed(format!("renderer returned non-UTF-8: {error}")))
 }
 
 fn classify_extraction_failure(doc: &crate::document::ParsedDocument) -> &'static str {
