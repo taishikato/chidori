@@ -811,6 +811,23 @@ fn cleaner_strips_dangerous_attributes_from_remaining_elements() {
 }
 
 #[test]
+fn cleaner_preserves_greater_than_inside_quoted_attributes() {
+    let html = r#"
+    <article>
+      <p title="2 > 1">Keep comparison text.</p>
+      <p data-note='a > b'>Keep single quoted comparison.</p>
+    </article>"#;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
+
+    assert!(cleaned.contains(r#"title="2 &gt; 1""#));
+    assert!(cleaned.contains(r#"data-note="a &gt; b""#));
+    assert!(markdown.contains("Keep comparison text."));
+    assert!(markdown.contains("Keep single quoted comparison."));
+}
+
+#[test]
 fn converts_math_elements_to_markdown_delimiters() {
     let html = r#"
     <article>

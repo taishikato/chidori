@@ -218,7 +218,7 @@ fn strip_dangerous_attributes(html: &str) -> String {
     while let Some(index) = rest.find('<') {
         output.push_str(&rest[..index]);
         let candidate = &rest[index..];
-        let Some(end) = candidate.find('>') else {
+        let Some(end) = opening_tag_end(candidate) else {
             output.push_str(candidate);
             return output;
         };
@@ -233,6 +233,22 @@ fn strip_dangerous_attributes(html: &str) -> String {
 
     output.push_str(rest);
     output
+}
+
+fn opening_tag_end(input: &str) -> Option<usize> {
+    let mut quote: Option<char> = None;
+
+    for (index, character) in input.char_indices() {
+        match quote {
+            Some(current) if character == current => quote = None,
+            Some(_) => {}
+            None if character == '"' || character == '\'' => quote = Some(character),
+            None if character == '>' => return Some(index),
+            None => {}
+        }
+    }
+
+    None
 }
 
 fn sanitize_opening_tag(opening_tag: &str) -> String {
