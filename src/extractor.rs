@@ -175,15 +175,15 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
 
     if best_candidate.is_none() {
         best_candidate =
-            best_candidate_for_selectors(doc, BODY_FALLBACK_SELECTORS, &selectors, false)?;
-    }
-
-    if best_candidate.is_none() {
-        best_candidate =
             best_candidate_for_selectors(doc, PRIMARY_ENTRY_SELECTORS, &selectors, true)?;
         if best_candidate.is_some() {
             fallback_steps.push("hidden-content".to_string());
         }
+    }
+
+    if best_candidate.is_none() {
+        best_candidate =
+            best_candidate_for_selectors(doc, BODY_FALLBACK_SELECTORS, &selectors, false)?;
     }
 
     let mut used_structured_content = false;

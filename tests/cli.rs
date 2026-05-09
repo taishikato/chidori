@@ -438,6 +438,46 @@ async fn json_debug_records_hidden_content_fallback() {
 }
 
 #[tokio::test]
+async fn json_debug_recovers_hidden_content_when_visible_body_is_shell_text() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/hidden-shell"))
+        .respond_with(html_response(
+            r#"
+            <html><head><title>Hidden Shell</title></head><body>
+              <div id="app">Loading...</div>
+              <article hidden>
+                <h1>Hidden Shell Article</h1>
+                <p>This hidden article has useful words that should beat the visible loading shell.</p>
+              </article>
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/hidden-shell", server.uri()))
+        .arg("--json")
+        .arg("--debug")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(json["debug"]["fallbacks"]
+        .as_array()
+        .unwrap()
+        .contains(&Value::String("hidden-content".to_string())));
+    assert!(json["markdown"]
+        .as_str()
+        .unwrap()
+        .contains("Hidden Shell Article"));
+    assert!(!json["markdown"].as_str().unwrap().contains("Loading..."));
+}
+
+#[tokio::test]
 async fn does_not_retry_with_bot_user_agent_when_initial_page_is_extractable() {
     let server = MockServer::start().await;
 
