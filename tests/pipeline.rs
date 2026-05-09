@@ -866,6 +866,20 @@ fn cleaner_strips_dangerous_attributes_from_remaining_elements() {
 }
 
 #[test]
+fn srcset_preference_does_not_reintroduce_dangerous_image_urls() {
+    let html = r#"
+    <article>
+      <img src="/safe.png" srcset="javascript:alert(1) 1200w" alt="Safe diagram">
+    </article>"#;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
+
+    assert!(!markdown.contains("javascript:"));
+    assert!(markdown.contains("![Safe diagram](/safe.png)"));
+}
+
+#[test]
 fn cleaner_preserves_greater_than_inside_quoted_attributes() {
     let html = r#"
     <article>

@@ -739,11 +739,23 @@ fn largest_srcset_candidate(srcset: &str) -> Option<&str> {
         .filter_map(|candidate| {
             let mut parts = candidate.split_whitespace();
             let url = parts.next()?;
+            if is_dangerous_url(url) {
+                return None;
+            }
             let descriptor_score = parts.next().and_then(srcset_descriptor_score).unwrap_or(0);
             Some((descriptor_score, url))
         })
         .max_by_key(|(descriptor_score, _url)| *descriptor_score)
         .map(|(_descriptor_score, url)| url)
+}
+
+fn is_dangerous_url(value: &str) -> bool {
+    let normalized = value
+        .chars()
+        .filter(|ch| !ch.is_ascii_whitespace() && !ch.is_control())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    normalized.starts_with("javascript:") || normalized.starts_with("data:text/html")
 }
 
 fn srcset_descriptor_score(descriptor: &str) -> Option<usize> {
