@@ -40,6 +40,9 @@ pub struct Cli {
 
     #[arg(long, help = "Emit extraction diagnostics and timing information")]
     pub debug: bool,
+
+    #[arg(long, hide = true, help = "Override document URL after fetching")]
+    pub source_url: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -53,6 +56,7 @@ pub struct RunConfig {
     pub lang: Option<String>,
     pub no_images: bool,
     pub debug: bool,
+    pub source_url: Option<Url>,
 }
 
 impl TryFrom<Cli> for RunConfig {
@@ -64,6 +68,13 @@ impl TryFrom<Cli> for RunConfig {
             "http" | "https" => {}
             _ => return Err(ChidoriError::InvalidUrl(cli.url)),
         }
+        let source_url = cli
+            .source_url
+            .as_deref()
+            .map(Url::parse)
+            .transpose()
+            .map_err(|_| ChidoriError::InvalidUrl(cli.source_url.clone().unwrap_or_default()))?;
+
         Ok(Self {
             url,
             json: cli.json,
@@ -74,6 +85,7 @@ impl TryFrom<Cli> for RunConfig {
             lang: cli.lang,
             no_images: cli.no_images,
             debug: cli.debug,
+            source_url,
         })
     }
 }
@@ -99,7 +111,11 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
         );
     }
 
-    let mut doc = crate::document::ParsedDocument::parse(page.body, page.final_url.clone());
+    let document_url = config
+        .source_url
+        .clone()
+        .unwrap_or_else(|| page.final_url.clone());
+    let mut doc = crate::document::ParsedDocument::parse(page.body, document_url);
     let markdown = match extract_markdown_from_doc(&doc, &config) {
         Ok(markdown) => markdown,
         Err(ChidoriError::ExtractionFailed) if config.user_agent.is_none() => {
@@ -112,10 +128,12 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
             };
             match fetch_url(&config.url, &bot_fetch_config).await {
                 Ok(bot_page) => {
-                    let bot_doc = crate::document::ParsedDocument::parse(
-                        bot_page.body,
-                        bot_page.final_url.clone(),
-                    );
+                    let bot_document_url = config
+                        .source_url
+                        .clone()
+                        .unwrap_or_else(|| bot_page.final_url.clone());
+                    let bot_doc =
+                        crate::document::ParsedDocument::parse(bot_page.body, bot_document_url);
                     match extract_markdown_from_doc(&bot_doc, &config) {
                         Ok(markdown) => {
                             page.final_url = bot_page.final_url;
@@ -132,7 +150,11 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
     };
 
     let mut metadata = crate::metadata::extract_metadata(&doc);
-    metadata.url = config.url.to_string();
+    metadata.url = config
+        .source_url
+        .as_ref()
+        .unwrap_or(&config.url)
+        .to_string();
     metadata.final_url = page.final_url.to_string();
 
     if markdown.trim().is_empty() {
@@ -162,6 +184,11 @@ fn extract_markdown_from_doc(
     config: &RunConfig,
 ) -> Result<String, ChidoriError> {
     let markdown = if let Some(raw_markdown) = crate::markdown::extract_raw_markdown(&doc.html) {
+        let raw_markdown = if config.no_images {
+            crate::markdown::remove_markdown_images(&raw_markdown)
+        } else {
+            raw_markdown
+        };
         if let Some(max_chars) = config.max_chars {
             raw_markdown.chars().take(max_chars).collect()
         } else {

@@ -47,6 +47,29 @@ pub fn extract_raw_markdown(html: &str) -> Option<String> {
     Some(markdown.replace("\n\n\n", "\n\n").trim().to_string())
 }
 
+pub fn remove_markdown_images(markdown: &str) -> String {
+    let mut output = String::with_capacity(markdown.len());
+    let mut index = 0;
+
+    while let Some(relative_start) = markdown[index..].find("![") {
+        let start = index + relative_start;
+        output.push_str(&markdown[index..start]);
+        let Some(label_end) = markdown[start + 2..].find("](").map(|end| start + 2 + end) else {
+            output.push_str(&markdown[start..]);
+            return output;
+        };
+        let url_start = label_end + 2;
+        let Some(url_end) = markdown[url_start..].find(')').map(|end| url_start + end) else {
+            output.push_str(&markdown[start..]);
+            return output;
+        };
+        index = url_end + 1;
+    }
+
+    output.push_str(&markdown[index..]);
+    output
+}
+
 fn has_visible_markup(html: &str) -> bool {
     let mut rest = html;
     while let Some(index) = rest.find('<') {

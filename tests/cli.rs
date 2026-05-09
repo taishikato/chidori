@@ -167,6 +167,69 @@ This body is already **Markdown** and should stay that way.
 }
 
 #[tokio::test]
+async fn no_images_removes_raw_markdown_images() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/raw-markdown-images"))
+        .respond_with(html_response(
+            r#"
+            <html><head><title>Raw Markdown Images</title></head><body>
+# Raw Markdown Images
+
+This body is already **Markdown**.
+
+![Hero image](https://example.com/hero.png)
+
+- item with [a link](https://example.com)
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/raw-markdown-images", server.uri()))
+        .arg("--no-images")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "This body is already **Markdown**",
+        ))
+        .stdout(predicate::str::contains("[a link](https://example.com)"))
+        .stdout(predicate::str::contains("Hero image").not())
+        .stdout(predicate::str::contains("hero.png").not())
+        .stderr(predicate::str::is_empty());
+}
+
+#[tokio::test]
+async fn source_url_exercises_domain_specific_extraction_for_local_fixtures() {
+    let server = MockServer::start().await;
+    let fixture =
+        std::fs::read_to_string("tests/fixtures/reference/domain--video-watch-page.html").unwrap();
+    Mock::given(method("GET"))
+        .and(path("/video-fixture"))
+        .respond_with(html_response(&fixture))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/video-fixture", server.uri()))
+        .arg("--source-url")
+        .arg("https://www.youtube.com/watch?v=abc123xyz")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Building a Parser Garden"))
+        .stdout(predicate::str::contains("Example Channel"))
+        .stdout(predicate::str::contains(
+            "This walkthrough shows how small extraction fixtures make CLI output predictable.",
+        ))
+        .stdout(predicate::str::contains("Inline Recommendation That Should Not Win").not())
+        .stdout(predicate::str::contains("Related Video That Should Not Win").not())
+        .stdout(predicate::str::contains("123K views").not())
+        .stderr(predicate::str::is_empty());
+}
+
+#[tokio::test]
 async fn retries_with_bot_user_agent_when_initial_page_has_no_extractable_content() {
     let server = MockServer::start().await;
 

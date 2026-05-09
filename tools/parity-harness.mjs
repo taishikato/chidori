@@ -152,7 +152,12 @@ async function ensureBinaries(options) {
 
 async function runCase(testCase, baseUrl) {
   const url = `${baseUrl}/fixture?fixture=${encodeURIComponent(testCase.fixture)}&source=${encodeURIComponent(testCase.sourceUrl)}`;
-  const chidori = await run(resolve(root, 'target/debug/chidori'), [url, '--json']);
+  const chidori = await run(resolve(root, 'target/debug/chidori'), [
+    url,
+    '--json',
+    '--source-url',
+    testCase.sourceUrl,
+  ]);
   const reference = await run(
     'node',
     [referenceCli, 'parse', resolve(root, testCase.fixture), '--json', '--markdown'],
