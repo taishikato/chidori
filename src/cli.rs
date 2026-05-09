@@ -140,65 +140,54 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
     let mut fallback_steps = Vec::new();
     let extraction = match extract_markdown_from_doc(&doc, &config) {
         Ok(extraction) => extraction,
-        Err(ChidoriError::ExtractionFailed) if config.render == RenderFallback::Auto => {
+        Err(ChidoriError::ExtractionFailed) => {
             if config.debug {
                 eprintln!(
                     "debug: extraction failed: {}",
                     classify_extraction_failure(&doc)
                 );
-                eprintln!("debug: retrying with external renderer");
             }
-            fallback_steps.push("external-renderer".to_string());
-            let rendered_html = render_with_external_command(&config.url)?;
-            let rendered_url = config
-                .source_url
-                .clone()
-                .unwrap_or_else(|| page.final_url.clone());
-            doc = crate::document::ParsedDocument::parse(rendered_html, rendered_url);
-            match extract_markdown_from_doc(&doc, &config) {
-                Ok(extraction) => extraction,
-                Err(error) => return Err(error),
-            }
-        }
-        Err(ChidoriError::ExtractionFailed) if config.user_agent.is_none() => {
-            if config.debug {
-                eprintln!(
-                    "debug: extraction failed: {}",
-                    classify_extraction_failure(&doc)
-                );
-                eprintln!("debug: retrying with bot user-agent");
-            }
-            fallback_steps.push("bot-user-agent".to_string());
-            let bot_fetch_config = FetchConfig {
-                user_agent: BOT_USER_AGENT.to_string(),
-                ..fetch_config.clone()
-            };
-            match fetch_url(&config.url, &bot_fetch_config).await {
-                Ok(bot_page) => {
-                    let bot_document_url = config
+
+            if config.render == RenderFallback::Auto {
+                if config.debug {
+                    eprintln!("debug: retrying with external renderer");
+                }
+                match render_with_external_command(&config.url).and_then(|rendered_html| {
+                    let rendered_url = config
                         .source_url
                         .clone()
-                        .unwrap_or_else(|| bot_page.final_url.clone());
-                    let bot_doc =
-                        crate::document::ParsedDocument::parse(bot_page.body, bot_document_url);
-                    match extract_markdown_from_doc(&bot_doc, &config) {
-                        Ok(extraction) => {
-                            page.final_url = bot_page.final_url;
-                            doc = bot_doc;
-                            extraction
-                        }
-                        Err(_) => {
-                            if config.debug {
-                                eprintln!(
-                                    "debug: extraction failed: {}",
-                                    classify_extraction_failure(&bot_doc)
-                                );
-                            }
-                            return Err(ChidoriError::ExtractionFailed);
-                        }
+                        .unwrap_or_else(|| page.final_url.clone());
+                    let rendered_doc =
+                        crate::document::ParsedDocument::parse(rendered_html, rendered_url);
+                    extract_markdown_from_doc(&rendered_doc, &config)
+                        .map(|extraction| (rendered_doc, extraction))
+                }) {
+                    Ok((rendered_doc, extraction)) => {
+                        fallback_steps.push("external-renderer".to_string());
+                        doc = rendered_doc;
+                        extraction
                     }
+                    Err(error) if config.user_agent.is_none() => {
+                        if config.debug {
+                            eprintln!("debug: external renderer failed: {}", error);
+                        }
+                        fallback_steps.push("bot-user-agent".to_string());
+                        retry_with_bot_user_agent(
+                            &config,
+                            &fetch_config,
+                            &mut page.final_url,
+                            &mut doc,
+                        )
+                        .await?
+                    }
+                    Err(error) => return Err(error),
                 }
-                Err(_) => return Err(ChidoriError::ExtractionFailed),
+            } else if config.user_agent.is_none() {
+                fallback_steps.push("bot-user-agent".to_string());
+                retry_with_bot_user_agent(&config, &fetch_config, &mut page.final_url, &mut doc)
+                    .await?
+            } else {
+                return Err(ChidoriError::ExtractionFailed);
             }
         }
         Err(error) => return Err(error),
@@ -246,6 +235,49 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
     let rendered =
         crate::output::render_output_with_debug(&metadata, &markdown, mode, debug.as_ref())?;
     crate::output::write_output(config.output.as_deref(), &rendered)
+}
+
+async fn retry_with_bot_user_agent(
+    config: &RunConfig,
+    fetch_config: &FetchConfig,
+    final_url: &mut Url,
+    doc: &mut crate::document::ParsedDocument,
+) -> Result<ExtractionResult, ChidoriError> {
+    if config.debug {
+        eprintln!("debug: retrying with bot user-agent");
+    }
+
+    let bot_fetch_config = FetchConfig {
+        user_agent: BOT_USER_AGENT.to_string(),
+        ..fetch_config.clone()
+    };
+    match fetch_url(&config.url, &bot_fetch_config).await {
+        Ok(bot_page) => {
+            let bot_final_url = bot_page.final_url.clone();
+            let bot_document_url = config
+                .source_url
+                .clone()
+                .unwrap_or_else(|| bot_final_url.clone());
+            let bot_doc = crate::document::ParsedDocument::parse(bot_page.body, bot_document_url);
+            match extract_markdown_from_doc(&bot_doc, config) {
+                Ok(extraction) => {
+                    *final_url = bot_final_url;
+                    *doc = bot_doc;
+                    Ok(extraction)
+                }
+                Err(_) => {
+                    if config.debug {
+                        eprintln!(
+                            "debug: extraction failed: {}",
+                            classify_extraction_failure(&bot_doc)
+                        );
+                    }
+                    Err(ChidoriError::ExtractionFailed)
+                }
+            }
+        }
+        Err(_) => Err(ChidoriError::ExtractionFailed),
+    }
 }
 
 fn render_with_external_command(url: &Url) -> Result<String, ChidoriError> {

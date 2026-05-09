@@ -1,7 +1,7 @@
 use chidori::{
     cleaner::{clean_html, CleanOptions},
     document::ParsedDocument,
-    extractor::extract_main_html,
+    extractor::{extract_main_content, extract_main_html},
     markdown::{extract_raw_markdown, html_to_markdown, remove_markdown_images, MarkdownOptions},
     metadata::{extract_metadata, Metadata},
     output::{render_output, RenderMode},
@@ -713,6 +713,28 @@ fn ignores_non_article_schema_text_for_structured_body_fallback() {
 
     assert!(main.contains("Short visible article shell"));
     assert!(!main.contains("This FAQ answer is long enough"));
+}
+
+#[test]
+fn known_site_selectors_do_not_match_domain_suffix_false_positives() {
+    let html = r#"
+    <html><body>
+      <article><p>Short teaser.</p></article>
+      <main>
+        <h1>Boundary-Safe Host Matching</h1>
+        <p>This main content has enough useful words to beat the short teaser article candidate.</p>
+        <p>It should be selected by generic scoring, not by a false positive Medium host match.</p>
+      </main>
+    </body></html>"#;
+    let doc = ParsedDocument::parse(
+        html.to_string(),
+        Url::parse("https://notmedium.com/post").unwrap(),
+    );
+
+    let main = extract_main_content(&doc).unwrap();
+
+    assert!(main.html.contains("Boundary-Safe Host Matching"));
+    assert_ne!(main.selector.as_deref(), Some("article"));
 }
 
 #[test]

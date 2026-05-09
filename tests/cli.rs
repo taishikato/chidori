@@ -805,6 +805,49 @@ HTML
 }
 
 #[tokio::test]
+async fn render_auto_falls_back_to_bot_user_agent_when_renderer_is_unavailable() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/bot-render-auto"))
+        .and(header("user-agent", DEFAULT_USER_AGENT))
+        .respond_with(html_response(
+            r#"<html><body><div id="root"></div><script>hydrate()</script></body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/bot-render-auto"))
+        .and(header("user-agent", BOT_USER_AGENT))
+        .respond_with(html_response(
+            r#"
+            <html><body>
+              <article>
+                <h1>Bot Render Auto</h1>
+                <p>The bot user-agent fallback still runs when rendering is unavailable.</p>
+              </article>
+            </body></html>
+            "#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/bot-render-auto", server.uri()))
+        .arg("--render=auto")
+        .env_remove("CHIDORI_RENDER_COMMAND")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Bot Render Auto"))
+        .stdout(predicate::str::contains(
+            "The bot user-agent fallback still runs",
+        ));
+}
+
+#[tokio::test]
 async fn debug_classifies_unsupported_content_type_fetch_failures() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

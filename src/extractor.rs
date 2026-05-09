@@ -242,13 +242,13 @@ fn known_site_content_candidate(
         return Ok(None);
     };
 
-    let content_selector = if host == "en.wikipedia.org" || host.ends_with(".wikipedia.org") {
+    let content_selector = if host_matches(host, "wikipedia.org") {
         "#mw-content-text"
-    } else if host.ends_with("medium.com") {
+    } else if host_matches(host, "medium.com") {
         "article"
-    } else if host.ends_with("substack.com") {
+    } else if host_matches(host, "substack.com") {
         "article, .body.markup, .available-content"
-    } else if host.contains("discourse") {
+    } else if host_matches(host, "discourse.org") || host_matches(host, "discourse.group") {
         ".topic-post .cooked, #post_1 .cooked, article .cooked"
     } else {
         return Ok(None);
@@ -282,6 +282,10 @@ fn known_site_content_candidate(
     output.push_str("</article>");
 
     Ok(Some((content_selector.to_string(), output)))
+}
+
+fn host_matches(host: &str, domain: &str) -> bool {
+    host == domain || host.ends_with(&format!(".{domain}"))
 }
 
 fn repository_discussion_candidate(doc: &ParsedDocument) -> Result<Option<String>, ChidoriError> {
