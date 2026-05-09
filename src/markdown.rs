@@ -314,6 +314,7 @@ impl SpecializedHtml {
             replacements: Vec::new(),
             footnotes: Vec::new(),
         };
+        specialized.prefer_largest_srcset_images();
         specialized.replace_math();
         specialized.replace_callouts();
         specialized.replace_footnotes();
@@ -340,6 +341,34 @@ impl SpecializedHtml {
         let placeholder = format!("CHIDORISPECIAL{}", self.replacements.len());
         self.replacements.push((placeholder.clone(), value));
         placeholder
+    }
+
+    fn prefer_largest_srcset_images(&mut self) {
+        let source = std::mem::take(&mut self.html);
+        let mut output = String::with_capacity(source.len());
+        let mut rest = source.as_str();
+
+        while let Some(index) = rest.find("<img") {
+            output.push_str(&rest[..index]);
+            let candidate = &rest[index..];
+            let Some(open_end) = candidate.find('>') else {
+                output.push_str(candidate);
+                self.html = output;
+                return;
+            };
+            let opening_tag = &candidate[..=open_end];
+            if let Some(best_src) = attr_value(opening_tag, "srcset")
+                .and_then(|srcset| largest_srcset_candidate(&srcset).map(ToString::to_string))
+            {
+                output.push_str(&replace_attr_value(opening_tag, "src", &best_src));
+            } else {
+                output.push_str(opening_tag);
+            }
+            rest = &candidate[open_end + 1..];
+        }
+
+        output.push_str(rest);
+        self.html = output;
     }
 
     fn replace_math(&mut self) {
@@ -702,6 +731,56 @@ fn attr_value(opening_tag: &str, name: &str) -> Option<String> {
     opening_attribute_values(opening_tag, name)
         .next()
         .map(|value| html_escape::decode_html_entities(value).to_string())
+}
+
+fn largest_srcset_candidate(srcset: &str) -> Option<&str> {
+    srcset
+        .split(',')
+        .filter_map(|candidate| {
+            let mut parts = candidate.split_whitespace();
+            let url = parts.next()?;
+            let width = parts
+                .next()
+                .and_then(|descriptor| descriptor.strip_suffix('w'))
+                .and_then(|width| width.parse::<usize>().ok())
+                .unwrap_or(0);
+            Some((width, url))
+        })
+        .max_by_key(|(width, _url)| *width)
+        .map(|(_width, url)| url)
+}
+
+fn replace_attr_value(opening_tag: &str, name: &str, value: &str) -> String {
+    let mut output = String::with_capacity(opening_tag.len() + value.len());
+    let mut rest = opening_tag;
+    let pattern = format!("{name}=");
+
+    if let Some(index) = rest.to_ascii_lowercase().find(&pattern) {
+        output.push_str(&rest[..index + pattern.len()]);
+        let value_start = index + pattern.len();
+        let after_equals = &rest[value_start..];
+        let Some(quote) = after_equals
+            .chars()
+            .next()
+            .filter(|quote| matches!(quote, '"' | '\''))
+        else {
+            output.push_str(value);
+            output.push_str(after_equals);
+            return output;
+        };
+        output.push(quote);
+        output.push_str(&html_escape::encode_double_quoted_attribute(value));
+        let after_quote = &after_equals[quote.len_utf8()..];
+        if let Some(end) = after_quote.find(quote) {
+            rest = &after_quote[end..];
+        } else {
+            return output;
+        }
+        output.push_str(rest);
+        return output;
+    }
+
+    opening_tag.to_string()
 }
 
 fn opening_attribute_values<'a>(

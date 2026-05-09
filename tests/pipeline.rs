@@ -1145,6 +1145,22 @@ fn keeps_images_when_allowed() {
 }
 
 #[test]
+fn preserves_figure_captions_and_prefers_largest_srcset_image() {
+    let html = r#"
+    <article>
+      <figure>
+        <img src="/small.png" srcset="/small.png 320w, /large.png 1200w" alt="Architecture diagram">
+        <figcaption>System architecture overview.</figcaption>
+      </figure>
+    </article>
+    "#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("![Architecture diagram](/large.png)"));
+    assert!(markdown.contains("System architecture overview."));
+}
+
+#[test]
 fn removes_picture_when_images_disabled() {
     let html = r#"
     <article>
