@@ -103,7 +103,15 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
             .unwrap_or_else(|| DEFAULT_USER_AGENT.to_string()),
         lang: config.lang.clone(),
     };
-    let mut page = fetch_url(&config.url, &fetch_config).await?;
+    let mut page = match fetch_url(&config.url, &fetch_config).await {
+        Ok(page) => page,
+        Err(error) => {
+            if config.debug {
+                eprintln!("debug: fetch failed: {}", classify_fetch_failure(&error));
+            }
+            return Err(error);
+        }
+    };
     if config.debug {
         eprintln!(
             "debug: fetched {} in {} ms",
@@ -230,11 +238,63 @@ fn classify_extraction_failure(doc: &crate::document::ParsedDocument) -> &'stati
 
     if text_word_count < 10 && has_app_mount && html.contains("<script") {
         "spa-shell"
+    } else if is_too_link_dense(&doc.html) {
+        "too-link-dense"
     } else if text_word_count == 0 {
         "empty-body"
     } else {
         "no-main-candidate"
     }
+}
+
+fn classify_fetch_failure(error: &ChidoriError) -> &'static str {
+    match error {
+        ChidoriError::UnsupportedContentType(_) => "unsupported-content-type",
+        ChidoriError::FetchFailed(message)
+            if message.starts_with("401 ") || message.starts_with("403 ") =>
+        {
+            "blocked-or-login"
+        }
+        ChidoriError::Timeout(_) => "timeout",
+        ChidoriError::TooLarge(_, _) => "too-large",
+        ChidoriError::InvalidUrl(_) => "invalid-url",
+        ChidoriError::FetchFailed(_) => "fetch-failed",
+        ChidoriError::ExtractionFailed => "extraction-failed",
+        ChidoriError::OutputFailed(_) => "output-failed",
+        ChidoriError::Unknown(_) => "unknown",
+    }
+}
+
+fn is_too_link_dense(html: &str) -> bool {
+    let dom = scraper::Html::parse_fragment(html);
+    let root = dom.root_element();
+    let text = root.text().collect::<Vec<_>>().join(" ");
+    let text_len = text.split_whitespace().collect::<String>().len();
+    if text_len == 0 {
+        return false;
+    }
+
+    let Ok(link_selector) = scraper::Selector::parse("a") else {
+        return false;
+    };
+    let links = root.select(&link_selector).collect::<Vec<_>>();
+    if links.len() < 20 {
+        return false;
+    }
+
+    let link_text_len = links
+        .iter()
+        .map(|link| {
+            link.text()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .split_whitespace()
+                .collect::<String>()
+                .len()
+        })
+        .sum::<usize>();
+
+    (link_text_len as f64 / text_len as f64) > 0.9
 }
 
 #[derive(Debug, Clone)]
@@ -298,6 +358,9 @@ fn extract_markdown_from_doc(
                     max_chars: config.max_chars,
                 },
             );
+            if content.score.is_some() && is_too_link_dense(&cleaned.html) {
+                return Err(ChidoriError::ExtractionFailed);
+            }
             (
                 markdown,
                 ExtractionPath::Html,

@@ -654,6 +654,84 @@ async fn debug_classifies_spa_shell_extraction_failures() {
 }
 
 #[tokio::test]
+async fn debug_classifies_unsupported_content_type_fetch_failures() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/json"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "application/json")
+                .set_body_string("{}"),
+        )
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/json", server.uri()))
+        .arg("--debug")
+        .assert()
+        .failure()
+        .code(6)
+        .stderr(predicate::str::contains(
+            "debug: fetch failed: unsupported-content-type",
+        ));
+}
+
+#[tokio::test]
+async fn debug_classifies_blocked_or_login_fetch_failures() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/login"))
+        .respond_with(ResponseTemplate::new(403).set_body_string("Forbidden"))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/login", server.uri()))
+        .arg("--debug")
+        .assert()
+        .failure()
+        .code(3)
+        .stderr(predicate::str::contains(
+            "debug: fetch failed: blocked-or-login",
+        ));
+}
+
+#[tokio::test]
+async fn debug_classifies_link_dense_extraction_failures() {
+    let server = MockServer::start().await;
+    let links = (0..80)
+        .map(|index| format!(r#"<a href="/{index}">Link {index}</a>"#))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let html = format!("<html><body><main>{links}</main></body></html>");
+    Mock::given(method("GET"))
+        .and(path("/links"))
+        .and(header("user-agent", DEFAULT_USER_AGENT))
+        .respond_with(html_response(&html))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/links"))
+        .and(header("user-agent", BOT_USER_AGENT))
+        .respond_with(html_response(&html))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/links", server.uri()))
+        .arg("--debug")
+        .assert()
+        .failure()
+        .code(7)
+        .stderr(predicate::str::contains(
+            "debug: extraction failed: too-link-dense",
+        ));
+}
+
+#[tokio::test]
 async fn json_debug_includes_structured_extraction_diagnostics() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
