@@ -2,13 +2,13 @@
 
 # chidori ⚡️
 
-A fast Rust-built web-to-Markdown fetcher for coding agents.
+A fast Rust-built web-to-Markdown fetcher for AI agents.
 
 ```bash
 npx chidori-fetch https://example.com
 ```
 
-`chidori` fetches a URL, extracts the main readable content, removes page noise, and prints Markdown to stdout by default. Logs and errors go to stderr so agents and shell scripts can safely pipe stdout into prompts, files, or other tools.
+`chidori` fetches a URL, extracts the main readable content, removes page noise, and prints Markdown to stdout by default. Logs and errors go to stderr so AI agents and shell scripts can safely pipe stdout into prompts, files, or other tools.
 
 ## Usage
 
@@ -23,7 +23,7 @@ chidori https://example.com --no-images
 
 ## Why
 
-Coding agents often need web pages as clean Markdown. `chidori` is built in Rust for fast CLI startup and predictable shell behavior.
+AI agents need web pages as clean, pipeable Markdown. `chidori` is built in Rust for fast CLI startup and predictable shell behavior in automated workflows.
 
 ## Status
 
