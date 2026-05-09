@@ -3,11 +3,16 @@ use crate::fetcher::{fetch_url, FetchConfig, BOT_USER_AGENT, DEFAULT_USER_AGENT}
 use clap::{Parser, ValueEnum};
 use std::fmt;
 use std::io::Read;
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{ChildStdout, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 use url::Url;
+
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 
 #[derive(Debug, Parser)]
 #[command(name = "chidori")]
@@ -154,18 +159,21 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
                 if config.debug {
                     eprintln!("debug: retrying with external renderer");
                 }
-                match render_with_external_command(&config.url, fetch_config.timeout).and_then(
-                    |rendered_html| {
-                        let rendered_url = config
-                            .source_url
-                            .clone()
-                            .unwrap_or_else(|| page.final_url.clone());
-                        let rendered_doc =
-                            crate::document::ParsedDocument::parse(rendered_html, rendered_url);
-                        extract_markdown_from_doc(&rendered_doc, &config)
-                            .map(|extraction| (rendered_doc, extraction))
-                    },
-                ) {
+                match render_with_external_command(
+                    &config.url,
+                    fetch_config.timeout,
+                    fetch_config.max_bytes,
+                )
+                .and_then(|rendered_html| {
+                    let rendered_url = config
+                        .source_url
+                        .clone()
+                        .unwrap_or_else(|| page.final_url.clone());
+                    let rendered_doc =
+                        crate::document::ParsedDocument::parse(rendered_html, rendered_url);
+                    extract_markdown_from_doc(&rendered_doc, &config)
+                        .map(|extraction| (rendered_doc, extraction))
+                }) {
                     Ok((rendered_doc, extraction)) => {
                         fallback_steps.push("external-renderer".to_string());
                         doc = rendered_doc;
@@ -199,7 +207,10 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
     fallback_steps.extend(extraction.fallbacks.iter().cloned());
     let markdown = extraction.markdown;
 
-    let mut metadata = crate::metadata::extract_metadata(&doc);
+    let mut metadata = crate::metadata::extract_metadata_with_content_title(
+        &doc,
+        extraction.content_title.as_deref(),
+    );
     metadata.url = config
         .source_url
         .as_ref()
@@ -284,53 +295,85 @@ async fn retry_with_bot_user_agent(
     }
 }
 
-fn render_with_external_command(url: &Url, timeout: Duration) -> Result<String, ChidoriError> {
+fn render_with_external_command(
+    url: &Url,
+    timeout: Duration,
+    max_bytes: u64,
+) -> Result<String, ChidoriError> {
     let command = std::env::var("CHIDORI_RENDER_COMMAND").map_err(|_| {
         ChidoriError::FetchFailed(
             "CHIDORI_RENDER_COMMAND is required when --render=auto is used".to_string(),
         )
     })?;
     let (program, args) = render_command_parts(&command)?;
-    let mut child = Command::new(&program)
+    let mut command = Command::new(&program);
+    command
         .args(args)
         .arg(url.as_str())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(unix)]
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setpgid(0, 0) == -1 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        });
+    }
+    let mut child = command
         .spawn()
         .map_err(|error| ChidoriError::FetchFailed(error.to_string()))?;
     let mut stdout = child
         .stdout
         .take()
         .ok_or_else(|| ChidoriError::FetchFailed("renderer stdout unavailable".to_string()))?;
-    let stdout_reader = thread::spawn(move || {
-        let mut output = Vec::new();
-        stdout.read_to_end(&mut output).map(|_| output)
-    });
+    set_renderer_stdout_nonblocking(&stdout)?;
     let started = Instant::now();
+    let mut status = None;
+    let mut stdout_done = false;
+    let mut output = Vec::new();
 
-    let status = loop {
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|error| ChidoriError::FetchFailed(error.to_string()))?
-        {
-            break status;
+    loop {
+        if status.is_none() {
+            status = child
+                .try_wait()
+                .map_err(|error| ChidoriError::FetchFailed(error.to_string()))?;
+        }
+
+        if !stdout_done {
+            match read_available_renderer_stdout(&mut stdout, &mut output, max_bytes) {
+                Ok(RendererStdoutState::Eof) => stdout_done = true,
+                Ok(RendererStdoutState::Drained)
+                    if status
+                        .as_ref()
+                        .is_some_and(|status| !status.success() || !output.is_empty()) =>
+                {
+                    stdout_done = true;
+                }
+                Ok(RendererStdoutState::Drained | RendererStdoutState::Read) => {}
+                Err(error) => {
+                    terminate_renderer(&mut child);
+                    return Err(error);
+                }
+            }
+        }
+
+        if status.is_some() && stdout_done {
+            break;
         }
 
         if started.elapsed() >= timeout {
-            let _ = child.kill();
-            let _ = child.wait();
-            let _ = stdout_reader.join();
+            terminate_renderer(&mut child);
             return Err(ChidoriError::Timeout(timeout.as_millis() as u64));
         }
 
         let remaining = timeout.saturating_sub(started.elapsed());
         thread::sleep(remaining.min(Duration::from_millis(10)));
-    };
+    }
 
-    let stdout = stdout_reader
-        .join()
-        .map_err(|_| ChidoriError::FetchFailed("renderer stdout reader panicked".to_string()))?
-        .map_err(|error| ChidoriError::FetchFailed(error.to_string()))?;
+    let status = status.expect("renderer status checked before loop exits");
 
     if !status.success() {
         return Err(ChidoriError::FetchFailed(format!(
@@ -339,8 +382,99 @@ fn render_with_external_command(url: &Url, timeout: Duration) -> Result<String, 
         )));
     }
 
-    String::from_utf8(stdout)
+    String::from_utf8(output)
         .map_err(|error| ChidoriError::FetchFailed(format!("renderer returned non-UTF-8: {error}")))
+}
+
+fn set_renderer_stdout_nonblocking(stdout: &ChildStdout) -> Result<(), ChidoriError> {
+    #[cfg(unix)]
+    unsafe {
+        let flags = libc::fcntl(stdout.as_raw_fd(), libc::F_GETFL);
+        if flags == -1 {
+            return Err(ChidoriError::FetchFailed(
+                std::io::Error::last_os_error().to_string(),
+            ));
+        }
+        if libc::fcntl(stdout.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) == -1 {
+            return Err(ChidoriError::FetchFailed(
+                std::io::Error::last_os_error().to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+enum RendererStdoutState {
+    Read,
+    Drained,
+    Eof,
+}
+
+fn read_available_renderer_stdout(
+    stdout: &mut ChildStdout,
+    output: &mut Vec<u8>,
+    max_bytes: u64,
+) -> Result<RendererStdoutState, ChidoriError> {
+    let mut buffer = [0_u8; 8192];
+    let mut read_any = false;
+
+    loop {
+        if !renderer_stdout_ready(stdout)? {
+            return Ok(if read_any {
+                RendererStdoutState::Read
+            } else {
+                RendererStdoutState::Drained
+            });
+        }
+
+        match stdout.read(&mut buffer) {
+            Ok(0) => return Ok(RendererStdoutState::Eof),
+            Ok(bytes_read) => {
+                read_any = true;
+                let actual = output.len() as u64 + bytes_read as u64;
+                if actual > max_bytes {
+                    return Err(ChidoriError::TooLarge(actual, max_bytes));
+                }
+                output.extend_from_slice(&buffer[..bytes_read]);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                return Ok(RendererStdoutState::Drained);
+            }
+            Err(error) => return Err(ChidoriError::FetchFailed(error.to_string())),
+        }
+    }
+}
+
+fn renderer_stdout_ready(stdout: &ChildStdout) -> Result<bool, ChidoriError> {
+    #[cfg(unix)]
+    unsafe {
+        let mut poll_fd = libc::pollfd {
+            fd: stdout.as_raw_fd(),
+            events: libc::POLLIN | libc::POLLHUP,
+            revents: 0,
+        };
+        let result = libc::poll(&mut poll_fd, 1, 0);
+        if result == -1 {
+            return Err(ChidoriError::FetchFailed(
+                std::io::Error::last_os_error().to_string(),
+            ));
+        }
+        Ok(result > 0 && (poll_fd.revents & libc::POLLIN) != 0)
+    }
+
+    #[cfg(not(unix))]
+    {
+        Ok(true)
+    }
+}
+
+fn terminate_renderer(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    unsafe {
+        let _ = libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL);
+    }
+    let _ = child.kill();
+    let _ = child.try_wait();
 }
 
 fn render_command_parts(command: &str) -> Result<(String, Vec<String>), ChidoriError> {
@@ -450,6 +584,7 @@ struct ExtractionResult {
     content_score: Option<isize>,
     removals: Vec<crate::cleaner::RemovalRecord>,
     fallbacks: Vec<String>,
+    content_title: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -471,7 +606,7 @@ fn extract_markdown_from_doc(
     doc: &crate::document::ParsedDocument,
     config: &RunConfig,
 ) -> Result<ExtractionResult, ChidoriError> {
-    let (markdown, path, content_selector, content_score, removals, fallbacks) =
+    let (markdown, path, content_selector, content_score, removals, fallbacks, content_title) =
         if let Some(raw_markdown) = crate::markdown::extract_raw_markdown(&doc.html) {
             let raw_markdown = if config.no_images {
                 crate::markdown::remove_markdown_images(&raw_markdown)
@@ -483,6 +618,7 @@ fn extract_markdown_from_doc(
             } else {
                 raw_markdown
             };
+            let content_title = first_markdown_heading(&markdown);
             (
                 markdown,
                 ExtractionPath::RawMarkdown,
@@ -490,6 +626,7 @@ fn extract_markdown_from_doc(
                 None,
                 Vec::new(),
                 Vec::new(),
+                content_title,
             )
         } else {
             let content = crate::extractor::extract_main_content(doc)?;
@@ -514,6 +651,7 @@ fn extract_markdown_from_doc(
                     max_chars: config.max_chars,
                 },
             );
+            let content_title = crate::metadata::title_from_html_fragment(&cleaned.html);
             if content.score.is_some() && is_too_link_dense(&cleaned.html) {
                 return Err(ChidoriError::ExtractionFailed);
             }
@@ -524,6 +662,7 @@ fn extract_markdown_from_doc(
                 content.score,
                 cleaned.removals,
                 content.fallbacks,
+                content_title,
             )
         };
 
@@ -537,6 +676,16 @@ fn extract_markdown_from_doc(
             content_score,
             removals,
             fallbacks,
+            content_title,
         })
     }
+}
+
+fn first_markdown_heading(markdown: &str) -> Option<String> {
+    markdown.lines().find_map(|line| {
+        line.strip_prefix("# ")
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+            .map(ToString::to_string)
+    })
 }

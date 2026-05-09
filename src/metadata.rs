@@ -32,18 +32,30 @@ pub struct MetaTag {
 }
 
 pub fn extract_metadata(doc: &ParsedDocument) -> Metadata {
+    extract_metadata_with_content_title(doc, None)
+}
+
+pub fn extract_metadata_with_content_title(
+    doc: &ParsedDocument,
+    content_title: Option<&str>,
+) -> Metadata {
     let schema_org_data = extract_schema_org_data(doc);
     let meta_tags = collect_meta_tags(doc);
     let site = meta(doc, "property", "og:site_name")
         .or_else(|| schema_string(&schema_org_data, &["publisher.name"]))
         .or_else(|| schema_type_string(&schema_org_data, "WebSite", "name"))
         .unwrap_or_default();
+    let content_title = content_title
+        .map(|title| title.trim().to_string())
+        .filter(|title| !title.is_empty() && !is_placeholder_title(title));
     let title = meta(doc, "property", "og:title")
         .or_else(|| meta(doc, "name", "twitter:title"))
         .or_else(|| schema_string(&schema_org_data, &["headline"]))
         .or_else(|| schema_article_string(&schema_org_data, "name"))
         .or_else(|| title(doc).map(|title| clean_title(&title, &site)))
         .filter(|title| !is_placeholder_title(title))
+        .or(content_title)
+        .or_else(|| semantic_h1_title(doc))
         .or_else(|| h1_title(doc))
         .unwrap_or_default();
 
@@ -84,6 +96,16 @@ pub fn extract_metadata(doc: &ParsedDocument) -> Metadata {
         schema_org_data,
         word_count: 0,
     }
+}
+
+pub fn title_from_html_fragment(html: &str) -> Option<String> {
+    let fragment = scraper::Html::parse_fragment(html);
+    let selector = Selector::parse("h1").ok()?;
+    fragment
+        .select(&selector)
+        .next()
+        .map(|node| node.text().collect::<Vec<_>>().join("").trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 pub fn structured_content_text(doc: &ParsedDocument) -> Option<String> {
@@ -137,7 +159,18 @@ fn title(doc: &ParsedDocument) -> Option<String> {
 }
 
 fn h1_title(doc: &ParsedDocument) -> Option<String> {
-    let selector = Selector::parse("h1").unwrap();
+    h1_title_for_selector(doc, "h1")
+}
+
+fn semantic_h1_title(doc: &ParsedDocument) -> Option<String> {
+    h1_title_for_selector(
+        doc,
+        r#"article h1, [role="article"] h1, main h1, [role="main"] h1"#,
+    )
+}
+
+fn h1_title_for_selector(doc: &ParsedDocument, raw_selector: &str) -> Option<String> {
+    let selector = Selector::parse(raw_selector).unwrap();
     doc.dom
         .select(&selector)
         .next()

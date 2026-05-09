@@ -248,6 +248,7 @@ dependencies = [
  "clap",
  "html-escape",
  "html2md",
+ "libc",
  "predicates",
  "reqwest",
  "scraper",

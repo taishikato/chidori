@@ -132,6 +132,44 @@ async fn json_outputs_metadata_and_markdown() {
 }
 
 #[tokio::test]
+async fn json_title_falls_back_to_extracted_article_heading() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/chrome-title"))
+        .respond_with(html_response(
+            r#"
+            <html lang="en">
+              <head><title>Loading</title></head>
+              <body>
+                <h1>Cookie settings</h1>
+                <article>
+                  <h1>Real Article Title</h1>
+                  <p>This real article body has enough useful words to be selected by extraction.</p>
+                </article>
+              </body>
+            </html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/chrome-title", server.uri()))
+        .arg("--json")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["title"], "Real Article Title");
+    assert!(json["markdown"]
+        .as_str()
+        .unwrap()
+        .contains("# Real Article Title"));
+}
+
+#[tokio::test]
 async fn extracts_raw_markdown_body_without_dom_whitespace_loss() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -979,6 +1017,97 @@ HTML
             "timed out fetching page after 50 ms",
         ));
     assert!(started.elapsed() < Duration::from_millis(1500));
+}
+
+#[tokio::test]
+async fn render_auto_rejects_renderer_output_over_fetch_limit() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/huge-renderer-output"))
+        .and(header("user-agent", "ChidoriTest/2.0"))
+        .respond_with(html_response(
+            r#"<html><body><div id="root"></div><script>hydrate()</script></body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let dir = tempdir().unwrap();
+    let renderer = dir.path().join("huge-renderer.sh");
+    std::fs::write(
+        &renderer,
+        r#"#!/bin/sh
+printf '<html><body><article><h1>Rendered Too Large</h1><p>'
+yes word | head -c 5500000
+printf '</p></article></body></html>'
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&renderer).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&renderer, permissions).unwrap();
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/huge-renderer-output", server.uri()))
+        .arg("--render=auto")
+        .arg("--max-chars")
+        .arg("20")
+        .arg("--user-agent")
+        .arg("ChidoriTest/2.0")
+        .env("CHIDORI_RENDER_COMMAND", &renderer)
+        .assert()
+        .failure()
+        .code(5)
+        .stderr(predicate::str::contains("page too large"));
+}
+
+#[tokio::test]
+async fn render_auto_times_out_waiting_for_renderer_descendant_stdout() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/forking-renderer"))
+        .and(header("user-agent", "ChidoriTest/2.0"))
+        .respond_with(html_response(
+            r#"<html><body><div id="root"></div><script>hydrate()</script></body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let dir = tempdir().unwrap();
+    let renderer = dir.path().join("forking-renderer.py");
+    std::fs::write(
+        &renderer,
+        r#"#!/usr/bin/env python3
+import os
+import sys
+import time
+
+pid = os.fork()
+if pid:
+    os._exit(0)
+time.sleep(1)
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&renderer).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&renderer, permissions).unwrap();
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/forking-renderer", server.uri()))
+        .arg("--render=auto")
+        .arg("--timeout")
+        .arg("500")
+        .arg("--user-agent")
+        .arg("ChidoriTest/2.0")
+        .env("CHIDORI_RENDER_COMMAND", &renderer)
+        .assert()
+        .failure()
+        .code(4)
+        .stderr(predicate::str::contains(
+            "timed out fetching page after 500 ms",
+        ));
 }
 
 #[tokio::test]
