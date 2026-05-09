@@ -59,7 +59,7 @@ pub fn remove_markdown_images(markdown: &str) -> String {
             return output;
         };
         let url_start = label_end + 2;
-        let Some(url_end) = markdown[url_start..].find(')').map(|end| url_start + end) else {
+        let Some(url_end) = markdown_url_end(markdown, url_start) else {
             output.push_str(&markdown[start..]);
             return output;
         };
@@ -68,6 +68,19 @@ pub fn remove_markdown_images(markdown: &str) -> String {
 
     output.push_str(&markdown[index..]);
     output
+}
+
+fn markdown_url_end(markdown: &str, url_start: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (offset, ch) in markdown[url_start..].char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' if depth == 0 => return Some(url_start + offset),
+            ')' => depth -= 1,
+            _ => {}
+        }
+    }
+    None
 }
 
 fn has_visible_markup(html: &str) -> bool {
@@ -116,16 +129,39 @@ fn remove_raw_tag(html: &str, tag: &str) -> String {
 
 fn strip_tags(html: &str) -> String {
     let mut output = String::with_capacity(html.len());
-    let mut in_tag = false;
-    for ch in html.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' if in_tag => in_tag = false,
-            _ if !in_tag => output.push(ch),
-            _ => {}
+    let mut chars = html.char_indices().peekable();
+
+    while let Some((index, ch)) = chars.next() {
+        if ch != '<' {
+            output.push(ch);
+            continue;
+        }
+
+        let Some((_, next)) = chars.peek().copied() else {
+            output.push(ch);
+            continue;
+        };
+        if !is_tag_start_character(next) {
+            output.push(ch);
+            continue;
+        }
+        let Some(close_offset) = html[index..].find('>') else {
+            return html.to_string();
+        };
+        let close_index = index + close_offset;
+        while chars
+            .peek()
+            .is_some_and(|(next_index, _)| *next_index <= close_index)
+        {
+            chars.next();
         }
     }
+
     output
+}
+
+fn is_tag_start_character(ch: char) -> bool {
+    ch.is_ascii_alphabetic() || matches!(ch, '/' | '!' | '?')
 }
 
 fn looks_like_markdown(content: &str) -> bool {
@@ -333,14 +369,17 @@ fn callout_markdown(fragment: &str, kind: &str) -> String {
     let content_markdown = html2md::parse_html(&content_html);
     let content = content_markdown
         .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
+        .map(str::trim_end)
         .collect::<Vec<_>>();
     let mut lines = vec![format!("> [!{}] {}", kind.trim(), title.trim())
         .trim_end()
         .to_string()];
     for line in content {
-        lines.push(format!("> {line}"));
+        lines.push(if line.is_empty() {
+            ">".to_string()
+        } else {
+            format!("> {line}")
+        });
     }
     lines.join("\n")
 }

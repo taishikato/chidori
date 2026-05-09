@@ -2,7 +2,7 @@ use chidori::{
     cleaner::{clean_html, CleanOptions},
     document::ParsedDocument,
     extractor::extract_main_html,
-    markdown::{extract_raw_markdown, html_to_markdown, MarkdownOptions},
+    markdown::{extract_raw_markdown, html_to_markdown, remove_markdown_images, MarkdownOptions},
     metadata::{extract_metadata, Metadata},
     output::{render_output, RenderMode},
 };
@@ -754,6 +754,51 @@ fn raw_markdown_detection_skips_normal_html_articles() {
 }
 
 #[test]
+fn raw_markdown_detection_preserves_literal_less_than_text() {
+    let html = r#"
+    <html>
+      <body>
+# Markdown Notes
+
+- Compare with a < b before choosing.
+- Keep **bold** text after the comparison.
+      </body>
+    </html>"#;
+
+    let markdown = extract_raw_markdown(html).unwrap();
+
+    assert!(markdown.contains("Compare with a < b before choosing."));
+    assert!(markdown.contains("Keep **bold** text after the comparison."));
+}
+
+#[test]
+fn raw_markdown_detection_preserves_unclosed_angle_text() {
+    let html = r#"
+    <html>
+      <body>
+# Markdown Notes
+
+- Run `chidori <url` from a shell.
+- Keep **bold** text after the snippet.
+      </body>
+    </html>"#;
+
+    let markdown = extract_raw_markdown(html).unwrap();
+
+    assert!(markdown.contains("Run `chidori <url` from a shell."));
+    assert!(markdown.contains("Keep **bold** text after the snippet."));
+}
+
+#[test]
+fn remove_markdown_images_handles_parenthesized_urls() {
+    let markdown = "Before ![plot](https://example.com/foo_(1).png) after.";
+
+    let without_images = remove_markdown_images(markdown);
+
+    assert_eq!(without_images, "Before  after.");
+}
+
+#[test]
 fn converts_special_elements_with_whitespace_around_attribute_equals() {
     let html = r##"
     <article>
@@ -804,6 +849,31 @@ fn converts_callouts_to_obsidian_style_blockquotes() {
     assert!(markdown.contains("> [!warning] Careful"));
     assert!(markdown.contains("> Do not delete the quoted payload."));
     assert!(!markdown.contains("callout-title"));
+}
+
+#[test]
+fn converts_callouts_without_flattening_nested_markdown() {
+    let html = r#"
+    <article>
+      <div class="callout" data-callout="note">
+        <div class="callout-title-inner">Keep shape</div>
+        <div class="callout-content">
+          <p>First paragraph.</p>
+          <p>Second paragraph.</p>
+          <pre><code>cargo test
+cargo clippy</code></pre>
+        </div>
+      </div>
+    </article>"#;
+
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("> [!note] Keep shape"));
+    assert!(markdown.contains("> First paragraph."));
+    assert!(markdown.contains(">\n> Second paragraph."));
+    assert!(markdown.contains("> ```"));
+    assert!(markdown.contains("> cargo test"));
+    assert!(markdown.contains("> cargo clippy"));
 }
 
 #[test]
