@@ -886,6 +886,24 @@ fn cleaner_strips_dangerous_attributes_from_remaining_elements() {
 }
 
 #[test]
+fn cleaner_strips_entity_encoded_dangerous_urls() {
+    let html = r#"
+    <article>
+      <p><a href="java&#x73;cript:alert(1)">Encoded JavaScript link</a></p>
+      <img src="data&#58;text/html,<script>alert(1)</script>" alt="Encoded data URL">
+    </article>"#;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+
+    assert!(cleaned.contains("Encoded JavaScript link"));
+    assert!(cleaned.contains("Encoded data URL"));
+    assert!(!cleaned.contains("href="));
+    assert!(!cleaned.contains("src="));
+    assert!(!cleaned.contains("javascript:"));
+    assert!(!cleaned.contains("data:text/html"));
+}
+
+#[test]
 fn cleaner_preserves_unquoted_root_relative_urls() {
     let html = r#"
     <article>
@@ -898,6 +916,21 @@ fn cleaner_preserves_unquoted_root_relative_urls() {
 
     assert!(markdown.contains("[Documentation](/docs)"));
     assert!(markdown.contains("![Hero](/hero.png)"));
+}
+
+#[test]
+fn cleaner_preserves_entity_encoded_attribute_values() {
+    let html = r#"
+    <article>
+      <p><a href="/search?q=rust&amp;page=2">Search results</a></p>
+      <img src="/images/diagram?size=large&amp;format=png" alt="A &amp; B diagram">
+    </article>"#;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("[Search results](/search?q=rust&page=2)"));
+    assert!(markdown.contains("![A & B diagram](/images/diagram?size=large&format=png)"));
 }
 
 #[test]

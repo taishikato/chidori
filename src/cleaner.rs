@@ -293,13 +293,14 @@ fn sanitize_opening_tag(opening_tag: &str) -> String {
     for (name, value) in (OpeningAttributes {
         input: &input[name_end..],
     }) {
-        if is_dangerous_attribute(name, value) {
+        let value = value.map(html_escape::decode_html_entities);
+        if is_dangerous_attribute(name, value.as_deref()) {
             continue;
         }
 
         output.push(' ');
         output.push_str(name);
-        if let Some(value) = value {
+        if let Some(value) = value.as_deref() {
             output.push_str("=\"");
             output.push_str(&html_escape::encode_double_quoted_attribute(value));
             output.push('"');
