@@ -39,6 +39,53 @@ extraction fails or only finds a short app shell, `chidori` runs
 `CHIDORI_RENDER_COMMAND <url>` and expects rendered HTML on stdout. Renderer
 output uses the same timeout and 5 MiB fetch limit.
 
+### External renderer example
+
+One simple renderer setup is a small Playwright script:
+
+```bash
+npm install -D playwright
+npx playwright install chromium
+```
+
+Create `render-page.mjs`:
+
+```js
+#!/usr/bin/env node
+import { chromium } from "playwright";
+
+const url = process.argv[2];
+
+if (!url) {
+  console.error("Usage: render-page.mjs <url>");
+  process.exit(2);
+}
+
+const browser = await chromium.launch({ headless: true });
+
+try {
+  const page = await browser.newPage();
+  await page.goto(url, {
+    waitUntil: "networkidle",
+    timeout: 10_000,
+  });
+
+  process.stdout.write(await page.content());
+} finally {
+  await browser.close();
+}
+```
+
+Then make it executable and pass it to `chidori`:
+
+```bash
+chmod +x render-page.mjs
+CHIDORI_RENDER_COMMAND=/absolute/path/to/render-page.mjs chidori https://example.com --render=auto
+```
+
+The renderer should write only HTML to stdout. Write logs and errors to stderr so
+`chidori` can safely read stdout as the rendered document.
+
 ## Why
 
 AI agents need web pages as clean, pipeable Markdown. `chidori` is built in Rust for fast CLI startup and predictable shell behavior in automated workflows.
