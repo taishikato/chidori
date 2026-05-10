@@ -279,8 +279,7 @@ fn sanitize_opening_tag(opening_tag: &str) -> String {
         .and_then(|value| value.strip_suffix('>'))
         .unwrap_or(opening_tag)
         .trim();
-    let self_closing = input.ends_with('/');
-    let input = input.trim_end_matches('/').trim_end();
+    let (input, self_closing) = split_self_closing_marker(input);
     let name_end = input
         .find(|ch: char| ch.is_ascii_whitespace() || ch == '/')
         .unwrap_or(input.len());
@@ -313,16 +312,59 @@ fn sanitize_opening_tag(opening_tag: &str) -> String {
     output
 }
 
+fn split_self_closing_marker(input: &str) -> (&str, bool) {
+    let trimmed = input.trim_end();
+    let Some(before_slash) = trimmed.strip_suffix('/') else {
+        return (trimmed, false);
+    };
+
+    let before_slash = before_slash.trim_end();
+    let Some(previous) = before_slash.chars().last() else {
+        return (trimmed, false);
+    };
+
+    if previous.is_ascii_whitespace()
+        || matches!(previous, '"' | '\'')
+        || !before_slash
+            .chars()
+            .any(|character| character.is_ascii_whitespace() || character == '=')
+        || trailing_unquoted_attribute_name(before_slash)
+            .is_some_and(|name| !is_url_attribute(name))
+    {
+        (before_slash, true)
+    } else {
+        (trimmed, false)
+    }
+}
+
+fn trailing_unquoted_attribute_name(input: &str) -> Option<&str> {
+    let value_start = input.rfind('=')? + 1;
+    let value = input[value_start..].trim_start();
+    if value.is_empty() || value.starts_with('"') || value.starts_with('\'') {
+        return None;
+    }
+
+    let name_end = input[..value_start - 1].trim_end().len();
+    let name_start = input[..name_end]
+        .rfind(|character: char| character.is_ascii_whitespace() || character == '/')
+        .map_or(0, |index| index + 1);
+    (name_start < name_end).then_some(&input[name_start..name_end])
+}
+
+fn is_url_attribute(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "href" | "src" | "action" | "formaction" | "xlink:href"
+    )
+}
+
 fn is_dangerous_attribute(name: &str, value: Option<&str>) -> bool {
     let name = name.to_ascii_lowercase();
     if name.starts_with("on") || name == "srcdoc" {
         return true;
     }
 
-    matches!(
-        name.as_str(),
-        "href" | "src" | "action" | "formaction" | "xlink:href"
-    ) && value.is_some_and(is_dangerous_url)
+    is_url_attribute(&name) && value.is_some_and(is_dangerous_url)
 }
 
 fn is_dangerous_url(value: &str) -> bool {

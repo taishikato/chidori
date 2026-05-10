@@ -486,11 +486,13 @@ async fn json_debug_recovers_hidden_content_when_visible_body_is_shell_text() {
         .respond_with(html_response(
             r#"
             <html><head><title>Hidden Shell</title></head><body>
-              <div id="app">Loading...</div>
-              <article hidden>
-                <h1>Hidden Shell Article</h1>
-                <p>This hidden article has useful words that should beat the visible loading shell.</p>
-              </article>
+              <main>
+                <div id="app">Loading...</div>
+                <article hidden>
+                  <h1>Hidden Shell Article</h1>
+                  <p>This hidden article has useful words that should beat the visible loading shell.</p>
+                </article>
+              </main>
             </body></html>
             "#,
         ))

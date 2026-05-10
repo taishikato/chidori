@@ -413,6 +413,31 @@ fn short_article_candidate_is_not_replaced_by_paragraph_wrapped_noise() {
 }
 
 #[test]
+fn hidden_boilerplate_does_not_replace_short_article_candidate() {
+    let hidden_noise = "hidden boilerplate ".repeat(100);
+    let html = format!(
+        r#"
+    <html><body>
+      <main>
+        <article>
+          <h1>Short Valid Post</h1>
+          <p>Concise real article text with enough words.</p>
+        </article>
+        <div hidden><p>{hidden_noise}</p></div>
+      </main>
+    </body></html>"#
+    );
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+
+    let content = extract_main_content(&doc).unwrap();
+
+    assert_eq!(content.selector.as_deref(), Some("article"));
+    assert!(!content.fallbacks.contains(&"hidden-content".to_string()));
+    assert!(content.html.contains("Concise real article text"));
+    assert!(!content.html.contains("hidden boilerplate"));
+}
+
+#[test]
 fn skips_empty_candidates() {
     let html = r#"
     <html><body>
@@ -907,15 +932,29 @@ fn cleaner_strips_entity_encoded_dangerous_urls() {
 fn cleaner_preserves_unquoted_root_relative_urls() {
     let html = r#"
     <article>
-      <p><a href=/docs>Documentation</a></p>
-      <img src=/hero.png alt=Hero>
+      <p><a href=/docs/>Documentation</a></p>
+      <img src=/hero/ alt=Hero>
     </article>"#;
 
     let cleaned = clean_html(html, &CleanOptions { no_images: false });
     let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
 
-    assert!(markdown.contains("[Documentation](/docs)"));
+    assert!(markdown.contains("[Documentation](/docs/)"));
+    assert!(markdown.contains("![Hero](/hero/)"));
+}
+
+#[test]
+fn cleaner_preserves_unquoted_alt_before_self_closing_slash() {
+    let html = r#"
+    <article>
+      <img src=/hero.png alt=Hero/>
+    </article>"#;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
+
     assert!(markdown.contains("![Hero](/hero.png)"));
+    assert!(!markdown.contains("Hero/"));
 }
 
 #[test]

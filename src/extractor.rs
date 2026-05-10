@@ -173,11 +173,22 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
     let mut best_candidate =
         best_candidate_for_selectors(doc, PRIMARY_ENTRY_SELECTORS, &selectors, false)?;
 
-    if best_candidate.is_none() {
-        best_candidate =
-            best_candidate_for_selectors(doc, PRIMARY_ENTRY_SELECTORS, &selectors, true)?;
-        if best_candidate.is_some() {
-            fallback_steps.push("hidden-content".to_string());
+    if best_candidate
+        .as_ref()
+        .is_none_or(|candidate| candidate.word_count < LOW_WORD_COUNT_RETRY_THRESHOLD)
+    {
+        if let Some(hidden_candidate) =
+            best_candidate_for_selectors(doc, PRIMARY_ENTRY_SELECTORS, &selectors, true)?
+        {
+            let use_hidden = best_candidate
+                .as_ref()
+                .is_none_or(|candidate| should_retry_with_body(candidate, &hidden_candidate));
+            if use_hidden {
+                best_candidate = Some(hidden_candidate);
+            }
+            if use_hidden {
+                fallback_steps.push("hidden-content".to_string());
+            }
         }
     }
 
