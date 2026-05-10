@@ -1111,6 +1111,48 @@ time.sleep(1)
 }
 
 #[tokio::test]
+async fn render_auto_fails_fast_when_renderer_outputs_nothing() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/empty-renderer"))
+        .and(header("user-agent", "ChidoriTest/2.0"))
+        .respond_with(html_response(
+            r#"<html><body><div id="root"></div><script>hydrate()</script></body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let dir = tempdir().unwrap();
+    let renderer = dir.path().join("empty-renderer.sh");
+    std::fs::write(
+        &renderer,
+        r#"#!/bin/sh
+exit 0
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&renderer).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&renderer, permissions).unwrap();
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let started = Instant::now();
+    cmd.arg(format!("{}/empty-renderer", server.uri()))
+        .arg("--render=auto")
+        .arg("--timeout")
+        .arg("2000")
+        .arg("--user-agent")
+        .arg("ChidoriTest/2.0")
+        .env("CHIDORI_RENDER_COMMAND", &renderer)
+        .assert()
+        .failure()
+        .code(7)
+        .stderr(predicate::str::contains("no content could be extracted"));
+    assert!(started.elapsed() < Duration::from_millis(1500));
+}
+
+#[tokio::test]
 async fn render_auto_falls_back_to_bot_user_agent_when_renderer_is_unavailable() {
     let server = MockServer::start().await;
 

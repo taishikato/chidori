@@ -419,7 +419,7 @@ impl<'a> Iterator for OpeningAttributes<'a> {
         }
 
         let value_end = rest
-            .find(|ch: char| ch.is_ascii_whitespace() || ch == '/')
+            .find(|ch: char| ch.is_ascii_whitespace() || ch == '>')
             .unwrap_or(rest.len());
         self.input = &rest[value_end..];
         Some((name, Some(&rest[..value_end])))

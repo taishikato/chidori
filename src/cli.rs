@@ -343,7 +343,13 @@ fn render_with_external_command(
         }
 
         if !stdout_done {
-            match read_available_renderer_stdout(&mut stdout, &mut output, max_bytes) {
+            let renderer_group_gone = status.is_some() && !renderer_process_group_alive(child.id());
+            match read_available_renderer_stdout(
+                &mut stdout,
+                &mut output,
+                max_bytes,
+                renderer_group_gone,
+            ) {
                 Ok(RendererStdoutState::Eof) => stdout_done = true,
                 Ok(RendererStdoutState::Drained)
                     if status
@@ -414,14 +420,27 @@ fn read_available_renderer_stdout(
     stdout: &mut ChildStdout,
     output: &mut Vec<u8>,
     max_bytes: u64,
+    renderer_group_gone: bool,
 ) -> Result<RendererStdoutState, ChidoriError> {
     let mut buffer = [0_u8; 8192];
     let mut read_any = false;
 
     loop {
-        if !renderer_stdout_ready(stdout)? {
+        let events = renderer_stdout_events(stdout)?;
+        if events == 0 {
+            if renderer_group_gone {
+                return Ok(RendererStdoutState::Eof);
+            }
             return Ok(if read_any {
                 RendererStdoutState::Read
+            } else {
+                RendererStdoutState::Drained
+            });
+        }
+        #[cfg(unix)]
+        if (events & libc::POLLIN) == 0 && (events & (libc::POLLHUP | libc::POLLERR)) != 0 {
+            return Ok(if renderer_group_gone {
+                RendererStdoutState::Eof
             } else {
                 RendererStdoutState::Drained
             });
@@ -445,7 +464,25 @@ fn read_available_renderer_stdout(
     }
 }
 
-fn renderer_stdout_ready(stdout: &ChildStdout) -> Result<bool, ChidoriError> {
+fn renderer_process_group_alive(child_id: u32) -> bool {
+    #[cfg(unix)]
+    unsafe {
+        let process_group_id = child_id as libc::pid_t;
+        if libc::kill(-process_group_id, 0) == 0 {
+            return true;
+        }
+
+        std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = child_id;
+        false
+    }
+}
+
+fn renderer_stdout_events(stdout: &ChildStdout) -> Result<i16, ChidoriError> {
     #[cfg(unix)]
     unsafe {
         let mut poll_fd = libc::pollfd {
@@ -459,12 +496,12 @@ fn renderer_stdout_ready(stdout: &ChildStdout) -> Result<bool, ChidoriError> {
                 std::io::Error::last_os_error().to_string(),
             ));
         }
-        Ok(result > 0 && (poll_fd.revents & libc::POLLIN) != 0)
+        Ok(if result > 0 { poll_fd.revents } else { 0 })
     }
 
     #[cfg(not(unix))]
     {
-        Ok(true)
+        Ok(1)
     }
 }
 

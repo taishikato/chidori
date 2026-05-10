@@ -866,6 +866,21 @@ fn cleaner_strips_dangerous_attributes_from_remaining_elements() {
 }
 
 #[test]
+fn cleaner_preserves_unquoted_root_relative_urls() {
+    let html = r#"
+    <article>
+      <p><a href=/docs>Documentation</a></p>
+      <img src=/hero.png alt=Hero>
+    </article>"#;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("[Documentation](/docs)"));
+    assert!(markdown.contains("![Hero](/hero.png)"));
+}
+
+#[test]
 fn srcset_preference_does_not_reintroduce_dangerous_image_urls() {
     let html = r#"
     <article>
