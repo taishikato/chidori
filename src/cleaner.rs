@@ -1,28 +1,121 @@
 use scraper::{Html, Selector};
+use serde::Serialize;
 
 #[derive(Debug, Clone, Copy)]
 pub struct CleanOptions {
     pub no_images: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemovalRecord {
+    pub step: String,
+    pub reason: String,
+    pub selector: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct CleanResult {
+    pub html: String,
+    pub removals: Vec<RemovalRecord>,
+}
+
 pub fn clean_html(html: &str, options: &CleanOptions) -> String {
+    clean_html_with_report(html, options).html
+}
+
+pub fn clean_html_with_report(html: &str, options: &CleanOptions) -> CleanResult {
+    clean_html_inner(html, options, true)
+}
+
+pub fn clean_html_preserving_hidden_with_report(html: &str, options: &CleanOptions) -> CleanResult {
+    clean_html_inner(html, options, false)
+}
+
+fn clean_html_inner(html: &str, options: &CleanOptions, remove_hidden: bool) -> CleanResult {
     let mut cleaned = html.to_string();
+    let mut removals = Vec::new();
     for tag in [
         "script", "style", "noscript", "nav", "footer", "aside", "button", "form", "iframe",
         "object", "embed",
     ] {
-        cleaned = remove_tag(&cleaned, tag);
+        let next = remove_tag(&cleaned, tag);
+        push_removal_if_changed(&mut removals, &cleaned, &next, "noise-tag", tag);
+        cleaned = next;
     }
-    cleaned = remove_hidden_elements(&cleaned);
-    cleaned = remove_navigation_like_blocks(&cleaned);
-    cleaned = remove_fragment_only_link_lists(&cleaned);
-    cleaned = remove_link_dense_related_sections(&cleaned);
+    if remove_hidden {
+        let next = remove_hidden_elements(&cleaned);
+        push_removal_if_changed(&mut removals, &cleaned, &next, "hidden-element", "[hidden]");
+        cleaned = next;
+    }
+    let next = remove_navigation_like_blocks(&cleaned);
+    push_removal_if_changed(
+        &mut removals,
+        &cleaned,
+        &next,
+        "navigation-like-block",
+        "[data-block=\"nav\"], .breadcrumb, .toc",
+    );
+    cleaned = next;
+    let next = remove_fragment_only_link_lists(&cleaned);
+    push_removal_if_changed(&mut removals, &cleaned, &next, "fragment-link-list", "ul");
+    cleaned = next;
+    let next = remove_link_dense_related_sections(&cleaned);
+    push_removal_if_changed(
+        &mut removals,
+        &cleaned,
+        &next,
+        "link-dense-related-section",
+        "section",
+    );
+    cleaned = next;
     cleaned = unwrap_javascript_links(&cleaned);
+    cleaned = strip_dangerous_attributes(&cleaned);
     if options.no_images {
-        cleaned = remove_tag(&cleaned, "img");
-        cleaned = remove_tag(&cleaned, "picture");
+        let next = remove_tag(&cleaned, "img");
+        push_removal_if_changed(&mut removals, &cleaned, &next, "image-disabled", "img");
+        cleaned = next;
+        let next = remove_tag(&cleaned, "picture");
+        push_removal_if_changed(&mut removals, &cleaned, &next, "image-disabled", "picture");
+        cleaned = next;
     }
-    cleaned
+    CleanResult {
+        html: cleaned,
+        removals,
+    }
+}
+
+fn push_removal_if_changed(
+    removals: &mut Vec<RemovalRecord>,
+    before: &str,
+    after: &str,
+    reason: &str,
+    selector: &str,
+) {
+    if before == after {
+        return;
+    }
+
+    removals.push(RemovalRecord {
+        step: "clean-html".to_string(),
+        reason: reason.to_string(),
+        selector: selector.to_string(),
+        count: removed_element_count(before, after, selector).max(1),
+    });
+}
+
+fn removed_element_count(before: &str, after: &str, selector: &str) -> usize {
+    let Ok(selector) = Selector::parse(selector) else {
+        return 0;
+    };
+    let before = Html::parse_fragment(before);
+    let after = Html::parse_fragment(after);
+
+    before
+        .select(&selector)
+        .count()
+        .saturating_sub(after.select(&selector).count())
 }
 
 fn remove_hidden_elements(html: &str) -> String {
@@ -129,6 +222,158 @@ fn unwrap_javascript_links(html: &str) -> String {
                 .starts_with("javascript:")
         })
     })
+}
+
+fn strip_dangerous_attributes(html: &str) -> String {
+    let mut output = String::with_capacity(html.len());
+    let mut rest = html;
+
+    while let Some(index) = rest.find('<') {
+        output.push_str(&rest[..index]);
+        let candidate = &rest[index..];
+        if !candidate.chars().nth(1).is_some_and(is_tag_start_character) {
+            output.push('<');
+            rest = &candidate[1..];
+            continue;
+        }
+        let Some(end) = opening_tag_end(candidate) else {
+            output.push_str(candidate);
+            return output;
+        };
+        let opening_tag = &candidate[..=end];
+        if opening_tag.starts_with("</") || opening_tag.starts_with("<!--") {
+            output.push_str(opening_tag);
+        } else {
+            output.push_str(&sanitize_opening_tag(opening_tag));
+        }
+        rest = &candidate[end + 1..];
+    }
+
+    output.push_str(rest);
+    output
+}
+
+fn is_tag_start_character(character: char) -> bool {
+    character.is_ascii_alphabetic() || matches!(character, '/' | '!' | '?')
+}
+
+fn opening_tag_end(input: &str) -> Option<usize> {
+    let mut quote: Option<char> = None;
+
+    for (index, character) in input.char_indices() {
+        match quote {
+            Some(current) if character == current => quote = None,
+            Some(_) => {}
+            None if character == '"' || character == '\'' => quote = Some(character),
+            None if character == '>' => return Some(index),
+            None => {}
+        }
+    }
+
+    None
+}
+
+fn sanitize_opening_tag(opening_tag: &str) -> String {
+    let input = opening_tag
+        .strip_prefix('<')
+        .and_then(|value| value.strip_suffix('>'))
+        .unwrap_or(opening_tag)
+        .trim();
+    let (input, self_closing) = split_self_closing_marker(input);
+    let name_end = input
+        .find(|ch: char| ch.is_ascii_whitespace() || ch == '/')
+        .unwrap_or(input.len());
+    let tag_name = &input[..name_end];
+    if tag_name.is_empty() {
+        return opening_tag.to_string();
+    }
+
+    let mut output = format!("<{tag_name}");
+    for (name, value) in (OpeningAttributes {
+        input: &input[name_end..],
+    }) {
+        let value = value.map(html_escape::decode_html_entities);
+        if is_dangerous_attribute(name, value.as_deref()) {
+            continue;
+        }
+
+        output.push(' ');
+        output.push_str(name);
+        if let Some(value) = value.as_deref() {
+            output.push_str("=\"");
+            output.push_str(&html_escape::encode_double_quoted_attribute(value));
+            output.push('"');
+        }
+    }
+    if self_closing {
+        output.push_str(" /");
+    }
+    output.push('>');
+    output
+}
+
+fn split_self_closing_marker(input: &str) -> (&str, bool) {
+    let trimmed = input.trim_end();
+    let Some(before_slash) = trimmed.strip_suffix('/') else {
+        return (trimmed, false);
+    };
+
+    let before_slash = before_slash.trim_end();
+    let Some(previous) = before_slash.chars().last() else {
+        return (trimmed, false);
+    };
+
+    if previous.is_ascii_whitespace()
+        || matches!(previous, '"' | '\'')
+        || !before_slash
+            .chars()
+            .any(|character| character.is_ascii_whitespace() || character == '=')
+        || trailing_unquoted_attribute_name(before_slash)
+            .is_some_and(|name| !is_url_attribute(name))
+    {
+        (before_slash, true)
+    } else {
+        (trimmed, false)
+    }
+}
+
+fn trailing_unquoted_attribute_name(input: &str) -> Option<&str> {
+    let value_start = input.rfind('=')? + 1;
+    let value = input[value_start..].trim_start();
+    if value.is_empty() || value.starts_with('"') || value.starts_with('\'') {
+        return None;
+    }
+
+    let name_end = input[..value_start - 1].trim_end().len();
+    let name_start = input[..name_end]
+        .rfind(|character: char| character.is_ascii_whitespace() || character == '/')
+        .map_or(0, |index| index + 1);
+    (name_start < name_end).then_some(&input[name_start..name_end])
+}
+
+fn is_url_attribute(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "href" | "src" | "action" | "formaction" | "xlink:href"
+    )
+}
+
+fn is_dangerous_attribute(name: &str, value: Option<&str>) -> bool {
+    let name = name.to_ascii_lowercase();
+    if name.starts_with("on") || name == "srcdoc" {
+        return true;
+    }
+
+    is_url_attribute(&name) && value.is_some_and(is_dangerous_url)
+}
+
+fn is_dangerous_url(value: &str) -> bool {
+    let normalized = value
+        .chars()
+        .filter(|ch| !ch.is_ascii_whitespace() && !ch.is_control())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    normalized.starts_with("javascript:") || normalized.starts_with("data:text/html")
 }
 
 fn has_class_token(opening_tag: &str, expected: &str) -> bool {
@@ -239,7 +484,7 @@ impl<'a> Iterator for OpeningAttributes<'a> {
         }
 
         let value_end = rest
-            .find(|ch: char| ch.is_ascii_whitespace() || ch == '/')
+            .find(|ch: char| ch.is_ascii_whitespace() || ch == '>')
             .unwrap_or(rest.len());
         self.input = &rest[value_end..];
         Some((name, Some(&rest[..value_end])))

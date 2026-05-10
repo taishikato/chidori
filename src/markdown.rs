@@ -314,6 +314,7 @@ impl SpecializedHtml {
             replacements: Vec::new(),
             footnotes: Vec::new(),
         };
+        specialized.prefer_largest_srcset_images();
         specialized.replace_math();
         specialized.replace_callouts();
         specialized.replace_footnotes();
@@ -340,6 +341,34 @@ impl SpecializedHtml {
         let placeholder = format!("CHIDORISPECIAL{}", self.replacements.len());
         self.replacements.push((placeholder.clone(), value));
         placeholder
+    }
+
+    fn prefer_largest_srcset_images(&mut self) {
+        let source = std::mem::take(&mut self.html);
+        let mut output = String::with_capacity(source.len());
+        let mut rest = source.as_str();
+
+        while let Some(index) = rest.find("<img") {
+            output.push_str(&rest[..index]);
+            let candidate = &rest[index..];
+            let Some(open_end) = opening_tag_end(candidate) else {
+                output.push_str(candidate);
+                self.html = output;
+                return;
+            };
+            let opening_tag = &candidate[..=open_end];
+            if let Some(best_src) = attr_value(opening_tag, "srcset")
+                .and_then(|srcset| largest_srcset_candidate(&srcset).map(ToString::to_string))
+            {
+                output.push_str(&set_attr_value(opening_tag, "src", &best_src));
+            } else {
+                output.push_str(opening_tag);
+            }
+            rest = &candidate[open_end + 1..];
+        }
+
+        output.push_str(rest);
+        self.html = output;
     }
 
     fn replace_math(&mut self) {
@@ -702,6 +731,166 @@ fn attr_value(opening_tag: &str, name: &str) -> Option<String> {
     opening_attribute_values(opening_tag, name)
         .next()
         .map(|value| html_escape::decode_html_entities(value).to_string())
+}
+
+fn largest_srcset_candidate(srcset: &str) -> Option<&str> {
+    srcset
+        .split(',')
+        .filter_map(|candidate| {
+            let mut parts = candidate.split_whitespace();
+            let url = parts.next()?;
+            if is_dangerous_url(url) {
+                return None;
+            }
+            let descriptor_score = parts.next().and_then(srcset_descriptor_score).unwrap_or(0);
+            Some((descriptor_score, url))
+        })
+        .max_by_key(|(descriptor_score, _url)| *descriptor_score)
+        .map(|(_descriptor_score, url)| url)
+}
+
+fn is_dangerous_url(value: &str) -> bool {
+    let normalized = value
+        .chars()
+        .filter(|ch| !ch.is_ascii_whitespace() && !ch.is_control())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    normalized.starts_with("javascript:") || normalized.starts_with("data:text/html")
+}
+
+fn srcset_descriptor_score(descriptor: &str) -> Option<usize> {
+    descriptor
+        .strip_suffix('w')
+        .and_then(|width| width.parse::<usize>().ok())
+        .or_else(|| {
+            descriptor.strip_suffix('x').and_then(|density| {
+                let density = density.parse::<f64>().ok()?;
+                density.is_finite().then_some((density * 1000.0) as usize)
+            })
+        })
+}
+
+fn set_attr_value(opening_tag: &str, name: &str, value: &str) -> String {
+    if let Some((value_start, value_end)) = attr_value_range(opening_tag, name) {
+        let mut output = String::with_capacity(opening_tag.len() + value.len());
+        output.push_str(&opening_tag[..value_start]);
+        output.push_str(&html_escape::encode_double_quoted_attribute(value));
+        output.push_str(&opening_tag[value_end..]);
+        return output;
+    }
+
+    insert_attr_value(opening_tag, name, value)
+}
+
+fn insert_attr_value(opening_tag: &str, name: &str, value: &str) -> String {
+    let close_start = opening_tag.rfind('>').unwrap_or(opening_tag.len());
+    let before_close = &opening_tag[..close_start];
+    let trimmed_end = before_close.trim_end().len();
+    let insert_at = if before_close[..trimmed_end].ends_with('/') {
+        trimmed_end.saturating_sub('/'.len_utf8())
+    } else {
+        close_start
+    };
+
+    let escaped = html_escape::encode_double_quoted_attribute(value);
+    let mut output = String::with_capacity(opening_tag.len() + name.len() + escaped.len() + 4);
+    output.push_str(&opening_tag[..insert_at]);
+    output.push(' ');
+    output.push_str(name);
+    output.push_str("=\"");
+    output.push_str(&escaped);
+    output.push('"');
+    output.push_str(&opening_tag[insert_at..]);
+    output
+}
+
+fn attr_value_range(opening_tag: &str, expected: &str) -> Option<(usize, usize)> {
+    let tag_offset = usize::from(opening_tag.starts_with('<'));
+    let input = &opening_tag[tag_offset..];
+    let input = input.trim_start();
+    let input_offset = tag_offset + opening_tag[tag_offset..].len() - input.len();
+    let name_end = input
+        .find(|ch: char| ch.is_ascii_whitespace() || ch == '/')
+        .unwrap_or(input.len());
+    let mut offset = input_offset + name_end;
+
+    while offset < opening_tag.len() {
+        let rest = &opening_tag[offset..];
+        let trimmed = rest.trim_start();
+        offset += rest.len() - trimmed.len();
+        if trimmed.is_empty() || trimmed.starts_with('/') || trimmed.starts_with('>') {
+            return None;
+        }
+
+        let name_end = trimmed
+            .find(|ch: char| ch.is_ascii_whitespace() || ch == '=' || ch == '/' || ch == '>')
+            .unwrap_or(trimmed.len());
+        if name_end == 0 {
+            offset += trimmed.chars().next()?.len_utf8();
+            continue;
+        }
+
+        let attr_name = &trimmed[..name_end];
+        offset += name_end;
+        let rest = &opening_tag[offset..];
+        let trimmed = rest.trim_start();
+        offset += rest.len() - trimmed.len();
+        if !trimmed.starts_with('=') {
+            continue;
+        }
+
+        offset += '='.len_utf8();
+        let rest = &opening_tag[offset..];
+        let trimmed = rest.trim_start();
+        offset += rest.len() - trimmed.len();
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        let value_start;
+        let value_end;
+        if let Some(quote) = trimmed
+            .chars()
+            .next()
+            .filter(|quote| matches!(quote, '"' | '\''))
+        {
+            value_start = offset + quote.len_utf8();
+            let value = &opening_tag[value_start..];
+            let end = value.find(quote)?;
+            value_end = value_start + end;
+            offset = value_end + quote.len_utf8();
+        } else {
+            value_start = offset;
+            let value = &opening_tag[value_start..];
+            let end = value
+                .find(|ch: char| ch.is_ascii_whitespace() || ch == '/' || ch == '>')
+                .unwrap_or(value.len());
+            value_end = value_start + end;
+            offset = value_end;
+        }
+
+        if attr_name.eq_ignore_ascii_case(expected) {
+            return Some((value_start, value_end));
+        }
+    }
+
+    None
+}
+
+fn opening_tag_end(input: &str) -> Option<usize> {
+    let mut quote: Option<char> = None;
+
+    for (index, character) in input.char_indices() {
+        match quote {
+            Some(current) if character == current => quote = None,
+            Some(_) => {}
+            None if character == '"' || character == '\'' => quote = Some(character),
+            None if character == '>' => return Some(index),
+            None => {}
+        }
+    }
+
+    None
 }
 
 fn opening_attribute_values<'a>(

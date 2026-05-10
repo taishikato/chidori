@@ -1,9 +1,9 @@
 use chidori::{
-    cleaner::{clean_html, CleanOptions},
+    cleaner::{clean_html, clean_html_with_report, CleanOptions},
     document::ParsedDocument,
-    extractor::extract_main_html,
+    extractor::{extract_main_content, extract_main_html},
     markdown::{extract_raw_markdown, html_to_markdown, remove_markdown_images, MarkdownOptions},
-    metadata::{extract_metadata, Metadata},
+    metadata::{extract_metadata, extract_metadata_with_content_title, Metadata},
     output::{render_output, RenderMode},
 };
 use url::Url;
@@ -41,6 +41,73 @@ fn extracts_basic_metadata() {
     assert_eq!(metadata.published, "2026-05-06");
     assert_eq!(metadata.language, "en");
     assert_eq!(metadata.word_count, 0);
+}
+
+#[test]
+fn cleans_site_suffix_from_html_title_when_site_name_is_known() {
+    let html = r#"<!doctype html>
+    <html lang="en">
+      <head>
+        <title>Readable Article | Example Site</title>
+        <meta property="og:site_name" content="Example Site">
+      </head>
+      <body><article><p>Hello world.</p></article></body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.title, "Readable Article");
+    assert_eq!(metadata.site, "Example Site");
+}
+
+#[test]
+fn extracts_canonical_meta_tags_and_richer_article_metadata() {
+    let html = r#"<!doctype html>
+    <html lang="en">
+      <head>
+        <title>Untitled</title>
+        <link rel="canonical" href="/canonical-post">
+        <meta property="og:site_name" content="Example Site">
+        <meta name="citation_author" content="Katherine Johnson">
+        <meta name="datePublished" content="2026-05-08">
+        <meta name="description" content="A richer article">
+      </head>
+      <body>
+        <article>
+          <h1>Real Article Title</h1>
+          <p>Hello world.</p>
+        </article>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.title, "Real Article Title");
+    assert_eq!(metadata.canonical_url, "https://example.com/canonical-post");
+    assert_eq!(metadata.author, "Katherine Johnson");
+    assert_eq!(metadata.published, "2026-05-08");
+    assert!(metadata.meta_tags.iter().any(|tag| {
+        tag.name.as_deref() == Some("description")
+            && tag.content.as_deref() == Some("A richer article")
+    }));
+}
+
+#[test]
+fn chrome_blocker_titles_yield_to_extracted_content_title() {
+    let html = r#"<!doctype html>
+    <html>
+      <head><title>Just a moment...</title></head>
+      <body>
+        <article>
+          <h1>Real Article Title</h1>
+          <p>Hello world.</p>
+        </article>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata_with_content_title(&doc, Some("Real Article Title"));
+
+    assert_eq!(metadata.title, "Real Article Title");
 }
 
 #[test]
@@ -364,6 +431,31 @@ fn short_article_candidate_is_not_replaced_by_paragraph_wrapped_noise() {
 }
 
 #[test]
+fn hidden_boilerplate_does_not_replace_short_article_candidate() {
+    let hidden_noise = "hidden boilerplate ".repeat(100);
+    let html = format!(
+        r#"
+    <html><body>
+      <main>
+        <article>
+          <h1>Short Valid Post</h1>
+          <p>Concise real article text with enough words.</p>
+        </article>
+        <div hidden><p>{hidden_noise}</p></div>
+      </main>
+    </body></html>"#
+    );
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+
+    let content = extract_main_content(&doc).unwrap();
+
+    assert_eq!(content.selector.as_deref(), Some("article"));
+    assert!(!content.fallbacks.contains(&"hidden-content".to_string()));
+    assert!(content.html.contains("Concise real article text"));
+    assert!(!content.html.contains("hidden boilerplate"));
+}
+
+#[test]
 fn skips_empty_candidates() {
     let html = r#"
     <html><body>
@@ -667,6 +759,83 @@ fn ignores_non_article_schema_text_for_structured_body_fallback() {
 }
 
 #[test]
+fn known_site_selectors_do_not_match_domain_suffix_false_positives() {
+    let html = r#"
+    <html><body>
+      <article><p>Short teaser.</p></article>
+      <main>
+        <h1>Boundary-Safe Host Matching</h1>
+        <p>This main content has enough useful words to beat the short teaser article candidate.</p>
+        <p>It should be selected by generic scoring, not by a false positive Medium host match.</p>
+      </main>
+    </body></html>"#;
+    let doc = ParsedDocument::parse(
+        html.to_string(),
+        Url::parse("https://notmedium.com/post").unwrap(),
+    );
+
+    let main = extract_main_content(&doc).unwrap();
+
+    assert!(main.html.contains("Boundary-Safe Host Matching"));
+    assert_ne!(main.selector.as_deref(), Some("article"));
+}
+
+#[test]
+fn known_site_candidate_does_not_duplicate_title_already_inside_content() {
+    let html = r#"
+    <html><body>
+      <article>
+        <h1>Medium Article Title</h1>
+        <p>This medium article body should keep its existing title only once.</p>
+      </article>
+    </body></html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://medium.com/acme/post").unwrap());
+
+    let main = extract_main_content(&doc).unwrap();
+    let cleaned = clean_html(&main.html, &CleanOptions { no_images: false });
+    let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
+
+    assert_eq!(markdown.matches("Medium Article Title").count(), 1);
+    assert!(markdown.contains("This medium article body"));
+}
+
+#[test]
+fn repository_discussion_candidate_does_not_duplicate_primary_body_comment() {
+    let html = r#"
+    <html><body>
+      <main>
+        <h1><bdi data-testid="issue-title">Parser Diagnostics</bdi></h1>
+        <div class="timeline-comment">
+          <div class="markdown-body">
+            <p>Primary issue body should appear exactly once.</p>
+          </div>
+        </div>
+        <div class="timeline-comment">
+          <div class="markdown-body">
+            <p>Follow-up comment should still be preserved.</p>
+          </div>
+        </div>
+      </main>
+    </body></html>"#;
+    let doc = ParsedDocument::parse(
+        html,
+        Url::parse("https://github.com/acme/widgets/issues/42").unwrap(),
+    );
+
+    let main = extract_main_content(&doc).unwrap();
+    let cleaned = clean_html(&main.html, &CleanOptions { no_images: false });
+    let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
+
+    assert_eq!(
+        markdown
+            .matches("Primary issue body should appear exactly once.")
+            .count(),
+        1
+    );
+    assert!(markdown.contains("Follow-up comment should still be preserved."));
+}
+
+#[test]
 fn removes_noise_and_optionally_images() {
     let html = r#"
     <article>
@@ -684,6 +853,26 @@ fn removes_noise_and_optionally_images() {
     assert!(!cleaned.contains("Related links"));
     assert!(!cleaned.contains("<img"));
     assert!(!cleaned.contains("Share"));
+}
+
+#[test]
+fn cleanup_report_counts_multiple_removed_elements() {
+    let html = r#"
+    <article>
+      <nav>Top navigation</nav>
+      <p>Keep this paragraph.</p>
+      <nav>Bottom navigation</nav>
+    </article>"#;
+
+    let cleaned = clean_html_with_report(html, &CleanOptions { no_images: false });
+    let nav_removal = cleaned
+        .removals
+        .iter()
+        .find(|removal| removal.reason == "noise-tag" && removal.selector == "nav")
+        .unwrap();
+
+    assert_eq!(nav_removal.count, 2);
+    assert!(!cleaned.html.contains("navigation"));
 }
 
 #[test]
@@ -720,6 +909,116 @@ fn unwraps_javascript_links_without_losing_inner_content() {
     assert!(markdown.contains("A **bold js link** should keep formatting."));
     assert!(markdown.contains("[links](https://example.com)"));
     assert!(!markdown.contains("javascript:"));
+}
+
+#[test]
+fn cleaner_strips_dangerous_attributes_from_remaining_elements() {
+    let html = r#"
+    <article>
+      <p onclick="steal()">Keep this paragraph.</p>
+      <iframe srcdoc="<script>alert(1)</script>"></iframe>
+      <img src="javascript:alert(1)" alt="Bad image">
+    </article>"#;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+
+    assert!(cleaned.contains("Keep this paragraph."));
+    assert!(!cleaned.contains("onclick"));
+    assert!(!cleaned.contains("srcdoc"));
+    assert!(!cleaned.contains("javascript:"));
+}
+
+#[test]
+fn cleaner_strips_entity_encoded_dangerous_urls() {
+    let html = r#"
+    <article>
+      <p><a href="java&#x73;cript:alert(1)">Encoded JavaScript link</a></p>
+      <img src="data&#58;text/html,<script>alert(1)</script>" alt="Encoded data URL">
+    </article>"#;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+
+    assert!(cleaned.contains("Encoded JavaScript link"));
+    assert!(cleaned.contains("Encoded data URL"));
+    assert!(!cleaned.contains("href="));
+    assert!(!cleaned.contains("src="));
+    assert!(!cleaned.contains("javascript:"));
+    assert!(!cleaned.contains("data:text/html"));
+}
+
+#[test]
+fn cleaner_preserves_unquoted_root_relative_urls() {
+    let html = r#"
+    <article>
+      <p><a href=/docs/>Documentation</a></p>
+      <img src=/hero/ alt=Hero>
+    </article>"#;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("[Documentation](/docs/)"));
+    assert!(markdown.contains("![Hero](/hero/)"));
+}
+
+#[test]
+fn cleaner_preserves_unquoted_alt_before_self_closing_slash() {
+    let html = r#"
+    <article>
+      <img src=/hero.png alt=Hero/>
+    </article>"#;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("![Hero](/hero.png)"));
+    assert!(!markdown.contains("Hero/"));
+}
+
+#[test]
+fn cleaner_preserves_entity_encoded_attribute_values() {
+    let html = r#"
+    <article>
+      <p><a href="/search?q=rust&amp;page=2">Search results</a></p>
+      <img src="/images/diagram?size=large&amp;format=png" alt="A &amp; B diagram">
+    </article>"#;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("[Search results](/search?q=rust&page=2)"));
+    assert!(markdown.contains("![A & B diagram](/images/diagram?size=large&format=png)"));
+}
+
+#[test]
+fn srcset_preference_does_not_reintroduce_dangerous_image_urls() {
+    let html = r#"
+    <article>
+      <img src="/safe.png" srcset="javascript:alert(1) 1200w" alt="Safe diagram">
+    </article>"#;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
+
+    assert!(!markdown.contains("javascript:"));
+    assert!(markdown.contains("![Safe diagram](/safe.png)"));
+}
+
+#[test]
+fn cleaner_preserves_greater_than_inside_quoted_attributes() {
+    let html = r#"
+    <article>
+      <p title="2 > 1">Keep comparison text.</p>
+      <p data-note='a > b'>Keep single quoted comparison.</p>
+    </article>"#;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
+
+    assert!(cleaned.contains(r#"title="2 &gt; 1""#));
+    assert!(cleaned.contains(r#"data-note="a &gt; b""#));
+    assert!(markdown.contains("Keep comparison text."));
+    assert!(markdown.contains("Keep single quoted comparison."));
 }
 
 #[test]
@@ -1083,6 +1382,17 @@ fn cleaner_treats_non_ascii_less_than_text_as_text() {
 }
 
 #[test]
+fn cleaner_preserves_ascii_less_than_comparison_text() {
+    let html = "<article><p>Keep comparisons like value < 2 > 1 intact.</p></article>";
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
+
+    assert!(cleaned.contains("value < 2 > 1"));
+    assert!(markdown.contains(r"value \< 2 \> 1"), "{markdown}");
+}
+
+#[test]
 fn keeps_images_when_allowed() {
     let html = r#"
     <article>
@@ -1093,6 +1403,70 @@ fn keeps_images_when_allowed() {
     let cleaned = clean_html(html, &CleanOptions { no_images: false });
     assert!(cleaned.contains("Keep this paragraph."));
     assert!(cleaned.contains("<img"));
+}
+
+#[test]
+fn preserves_figure_captions_and_prefers_largest_srcset_image() {
+    let html = r#"
+    <article>
+      <figure>
+        <img src="/small.png" srcset="/small.png 320w, /large.png 1200w" alt="Architecture diagram">
+        <figcaption>System architecture overview.</figcaption>
+      </figure>
+    </article>
+    "#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("![Architecture diagram](/large.png)"));
+    assert!(markdown.contains("System architecture overview."));
+}
+
+#[test]
+fn inserts_markdown_image_source_from_srcset_when_src_is_missing() {
+    let html = r#"
+    <article>
+      <img srcset="/small.png 320w, /large.png 1200w" alt="Responsive diagram">
+    </article>
+    "#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("![Responsive diagram](/large.png)"));
+}
+
+#[test]
+fn prefers_largest_srcset_image_when_quoted_attribute_contains_greater_than() {
+    let html = r#"
+    <article>
+      <img src="/small.png" alt="2 > 1 diagram" srcset="/small.png 320w, /large.png 1200w">
+    </article>
+    "#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("![2 > 1 diagram](/large.png)"));
+}
+
+#[test]
+fn prefers_largest_srcset_image_without_rewriting_data_src() {
+    let html = r#"
+    <article>
+      <img data-src="/lazy.png" src="/small.png" srcset="/small.png 320w, /large.png 1200w" alt="Lazy diagram">
+    </article>
+    "#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("![Lazy diagram](/large.png)"));
+}
+
+#[test]
+fn prefers_highest_density_srcset_image() {
+    let html = r#"
+    <article>
+      <img src="/fallback.png" srcset="/large.png 2x, /small.png 1x" alt="Density diagram">
+    </article>
+    "#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("![Density diagram](/large.png)"));
 }
 
 #[test]

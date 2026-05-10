@@ -39,9 +39,18 @@ const ARTICLE_RETRY_PROTECTION_MIN_WORDS: usize = 10;
 struct Candidate {
     score: isize,
     selector_index: usize,
+    selector: String,
     word_count: usize,
     content_block_count: usize,
     html: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExtractedContent {
+    pub html: String,
+    pub selector: Option<String>,
+    pub score: Option<isize>,
+    pub fallbacks: Vec<String>,
 }
 
 struct ScoringSelectors {
@@ -82,24 +91,71 @@ fn selector_priority(selector_count: usize, selector_index: usize) -> isize {
 }
 
 pub fn extract_main_html(doc: &ParsedDocument) -> Result<String, ChidoriError> {
+    extract_main_content(doc).map(|content| content.html)
+}
+
+pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, ChidoriError> {
     if let Some(html) = youtube_watch_candidate(doc)? {
-        return Ok(html);
+        return Ok(ExtractedContent {
+            html,
+            selector: Some("youtube-watch".to_string()),
+            score: None,
+            fallbacks: Vec::new(),
+        });
     }
 
     if let Some(html) = microblog_status_thread_candidate(doc)? {
-        return Ok(html);
+        return Ok(ExtractedContent {
+            html,
+            selector: Some("microblog-status-thread".to_string()),
+            score: None,
+            fallbacks: Vec::new(),
+        });
     }
 
     if let Some(html) = mastodon_status_thread_candidate(doc)? {
-        return Ok(html);
+        return Ok(ExtractedContent {
+            html,
+            selector: Some("mastodon-status-thread".to_string()),
+            score: None,
+            fallbacks: Vec::new(),
+        });
+    }
+
+    if let Some(html) = repository_discussion_candidate(doc)? {
+        return Ok(ExtractedContent {
+            html,
+            selector: Some("repository-discussion".to_string()),
+            score: None,
+            fallbacks: Vec::new(),
+        });
+    }
+
+    if let Some((selector, html)) = known_site_content_candidate(doc)? {
+        return Ok(ExtractedContent {
+            html,
+            selector: Some(selector),
+            score: None,
+            fallbacks: Vec::new(),
+        });
     }
 
     if let Some(html) = hacker_news_listing_candidate(doc)? {
-        return Ok(html);
+        return Ok(ExtractedContent {
+            html,
+            selector: Some("hacker-news-listing".to_string()),
+            score: None,
+            fallbacks: Vec::new(),
+        });
     }
 
     if let Some(html) = reddit_discussion_candidate(doc)? {
-        return Ok(html);
+        return Ok(ExtractedContent {
+            html,
+            selector: Some("reddit-discussion".to_string()),
+            score: None,
+            fallbacks: Vec::new(),
+        });
     }
 
     let selectors = ScoringSelectors {
@@ -113,11 +169,32 @@ pub fn extract_main_html(doc: &ParsedDocument) -> Result<String, ChidoriError> {
         .map_err(|error| ChidoriError::Unknown(error.to_string()))?,
     };
 
+    let mut fallback_steps = Vec::new();
     let mut best_candidate =
-        best_candidate_for_selectors(doc, PRIMARY_ENTRY_SELECTORS, &selectors)?;
+        best_candidate_for_selectors(doc, PRIMARY_ENTRY_SELECTORS, &selectors, false)?;
+
+    if best_candidate
+        .as_ref()
+        .is_none_or(|candidate| candidate.word_count < LOW_WORD_COUNT_RETRY_THRESHOLD)
+    {
+        if let Some(hidden_candidate) =
+            best_candidate_for_selectors(doc, PRIMARY_ENTRY_SELECTORS, &selectors, true)?
+        {
+            let use_hidden = best_candidate
+                .as_ref()
+                .is_none_or(|candidate| should_retry_with_body(candidate, &hidden_candidate));
+            if use_hidden {
+                best_candidate = Some(hidden_candidate);
+            }
+            if use_hidden {
+                fallback_steps.push("hidden-content".to_string());
+            }
+        }
+    }
 
     if best_candidate.is_none() {
-        best_candidate = best_candidate_for_selectors(doc, BODY_FALLBACK_SELECTORS, &selectors)?;
+        best_candidate =
+            best_candidate_for_selectors(doc, BODY_FALLBACK_SELECTORS, &selectors, false)?;
     }
 
     let mut used_structured_content = false;
@@ -127,6 +204,7 @@ pub fn extract_main_html(doc: &ParsedDocument) -> Result<String, ChidoriError> {
             best_candidate = Some(Candidate {
                 score: candidate.score,
                 selector_index: candidate.selector_index,
+                selector: "schema-org".to_string(),
                 word_count: text_word_count(&html),
                 content_block_count: candidate.content_block_count,
                 html,
@@ -140,7 +218,7 @@ pub fn extract_main_html(doc: &ParsedDocument) -> Result<String, ChidoriError> {
             .filter(|candidate| candidate.word_count < LOW_WORD_COUNT_RETRY_THRESHOLD)
         {
             if let Some(body_candidate) =
-                best_candidate_for_selectors(doc, BODY_FALLBACK_SELECTORS, &selectors)?
+                best_candidate_for_selectors(doc, BODY_FALLBACK_SELECTORS, &selectors, false)?
             {
                 if should_retry_with_body(candidate, &body_candidate) {
                     best_candidate = Some(body_candidate);
@@ -150,12 +228,143 @@ pub fn extract_main_html(doc: &ParsedDocument) -> Result<String, ChidoriError> {
     }
 
     if let Some(candidate) = best_candidate {
-        Ok(candidate.html)
+        Ok(ExtractedContent {
+            html: candidate.html,
+            selector: Some(candidate.selector),
+            score: Some(candidate.score),
+            fallbacks: fallback_steps,
+        })
     } else if let Some(html) = structured_content_candidate(doc, 0)? {
-        Ok(html)
+        Ok(ExtractedContent {
+            html,
+            selector: Some("schema-org".to_string()),
+            score: None,
+            fallbacks: vec!["schema-org".to_string()],
+        })
     } else {
         Err(ChidoriError::ExtractionFailed)
     }
+}
+
+fn known_site_content_candidate(
+    doc: &ParsedDocument,
+) -> Result<Option<(String, String)>, ChidoriError> {
+    let Some(host) = doc.url.host_str() else {
+        return Ok(None);
+    };
+
+    let content_selector = if host_matches(host, "wikipedia.org") {
+        "#mw-content-text"
+    } else if host_matches(host, "medium.com") {
+        "article"
+    } else if host_matches(host, "substack.com") {
+        "article, .body.markup, .available-content"
+    } else if host_matches(host, "discourse.org") || host_matches(host, "discourse.group") {
+        ".topic-post .cooked, #post_1 .cooked, article .cooked"
+    } else {
+        return Ok(None);
+    };
+
+    let selector = Selector::parse(content_selector)
+        .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let Some(content) = doc
+        .dom
+        .select(&selector)
+        .find(|content| !element_text(*content).is_empty())
+    else {
+        return Ok(None);
+    };
+
+    let title_selector = Selector::parse("h1, #firstHeading")
+        .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let title = doc
+        .dom
+        .select(&title_selector)
+        .map(element_text)
+        .find(|title| !title.is_empty());
+
+    let mut output = String::from("<article class=\"chidori-known-site-content\">");
+    if let Some(title) = title.filter(|_| content.select(&title_selector).next().is_none()) {
+        output.push_str("<h1>");
+        output.push_str(&encode_text(&title));
+        output.push_str("</h1>");
+    }
+    output.push_str(&content.inner_html());
+    output.push_str("</article>");
+
+    Ok(Some((content_selector.to_string(), output)))
+}
+
+fn host_matches(host: &str, domain: &str) -> bool {
+    host == domain || host.ends_with(&format!(".{domain}"))
+}
+
+fn repository_discussion_candidate(doc: &ParsedDocument) -> Result<Option<String>, ChidoriError> {
+    if !is_repository_discussion_path(doc) {
+        return Ok(None);
+    }
+
+    let title_selector = Selector::parse(
+        r#"[data-testid="issue-title"], .js-issue-title, bdi.markdown-title, h1 bdi"#,
+    )
+    .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let body_selector = Selector::parse(".markdown-body")
+        .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let comment_selector = Selector::parse(".timeline-comment, [data-testid=\"issue-comment\"]")
+        .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+
+    let Some(title) = doc
+        .dom
+        .select(&title_selector)
+        .map(element_text)
+        .find(|title| !title.is_empty())
+    else {
+        return Ok(None);
+    };
+    let bodies = doc.dom.select(&body_selector).collect::<Vec<_>>();
+    if bodies.is_empty() {
+        return Ok(None);
+    }
+
+    let mut output = String::from("<article class=\"chidori-repository-discussion\">");
+    output.push_str("<h1>");
+    output.push_str(&encode_text(&title));
+    output.push_str("</h1>");
+
+    let primary_body = bodies.first().copied();
+    if let Some(body) = primary_body {
+        output.push_str(&body.inner_html());
+    }
+
+    for comment in doc.dom.select(&comment_selector) {
+        if let Some(body) = comment.select(&body_selector).next() {
+            if Some(body) == primary_body {
+                continue;
+            }
+            output.push_str("<blockquote>");
+            output.push_str(&body.inner_html());
+            output.push_str("</blockquote>");
+        }
+    }
+
+    output.push_str("</article>");
+    Ok(Some(output))
+}
+
+fn is_repository_discussion_path(doc: &ParsedDocument) -> bool {
+    let Some(host) = doc.url.host_str() else {
+        return false;
+    };
+    if host != "github.com" && !host.ends_with(".github.com") {
+        return false;
+    }
+    let segments = doc
+        .url
+        .path_segments()
+        .map(|segments| segments.collect::<Vec<_>>())
+        .unwrap_or_default();
+
+    segments.len() >= 4 && matches!(segments[2], "issues" | "pull")
 }
 
 fn youtube_watch_candidate(doc: &ParsedDocument) -> Result<Option<String>, ChidoriError> {
@@ -1107,11 +1316,24 @@ fn should_retry_with_body(candidate: &Candidate, body_candidate: &Candidate) -> 
     body_candidate.content_block_count > 1
 }
 
+#[cfg(test)]
 fn score_element(
     element: ElementRef<'_>,
     selectors: &ScoringSelectors,
 ) -> (isize, usize, usize, usize) {
-    let text = text_without_invisible_nodes(&element.html());
+    score_element_with_visibility(element, selectors, false)
+}
+
+fn score_element_with_visibility(
+    element: ElementRef<'_>,
+    selectors: &ScoringSelectors,
+    include_hidden: bool,
+) -> (isize, usize, usize, usize) {
+    let text = if include_hidden {
+        element.text().collect::<Vec<_>>().join(" ")
+    } else {
+        text_without_invisible_nodes(&element.html())
+    };
     let word_count = text.split_whitespace().count();
     let paragraph_count = element.select(&selectors.paragraphs).count();
     let content_block_count = element.select(&selectors.body_content_blocks).count();
@@ -1184,6 +1406,7 @@ fn best_candidate_for_selectors(
     doc: &ParsedDocument,
     raw_selectors: &[&str],
     selectors: &ScoringSelectors,
+    include_hidden: bool,
 ) -> Result<Option<Candidate>, ChidoriError> {
     let mut best_candidate: Option<Candidate> = None;
 
@@ -1192,7 +1415,7 @@ fn best_candidate_for_selectors(
             .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
         for element in doc.dom.select(&selector) {
             let (content_score, word_count, _paragraph_count, content_block_count) =
-                score_element(element, selectors);
+                score_element_with_visibility(element, selectors, include_hidden);
             if word_count == 0 {
                 continue;
             }
@@ -1200,6 +1423,7 @@ fn best_candidate_for_selectors(
             let candidate = Candidate {
                 score,
                 selector_index,
+                selector: (*raw_selector).to_string(),
                 word_count,
                 content_block_count,
                 html: element.html(),

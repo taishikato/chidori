@@ -2,7 +2,11 @@ use assert_cmd::Command;
 use chidori::fetcher::{BOT_USER_AGENT, DEFAULT_USER_AGENT};
 use predicates::prelude::*;
 use serde_json::Value;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
+#[cfg(unix)]
+use std::time::Instant;
 use tempfile::tempdir;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -131,6 +135,44 @@ async fn json_outputs_metadata_and_markdown() {
 }
 
 #[tokio::test]
+async fn json_title_falls_back_to_extracted_article_heading() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/chrome-title"))
+        .respond_with(html_response(
+            r#"
+            <html lang="en">
+              <head><title>Loading</title></head>
+              <body>
+                <h1>Cookie settings</h1>
+                <article>
+                  <h1>Real Article Title</h1>
+                  <p>This real article body has enough useful words to be selected by extraction.</p>
+                </article>
+              </body>
+            </html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/chrome-title", server.uri()))
+        .arg("--json")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["title"], "Real Article Title");
+    assert!(json["markdown"]
+        .as_str()
+        .unwrap()
+        .contains("# Real Article Title"));
+}
+
+#[tokio::test]
 async fn extracts_raw_markdown_body_without_dom_whitespace_loss() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -230,6 +272,81 @@ async fn source_url_exercises_domain_specific_extraction_for_local_fixtures() {
 }
 
 #[tokio::test]
+async fn source_url_extracts_repository_issue_discussion() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repo-issue"))
+        .respond_with(html_response(
+            r#"
+            <html><body>
+              <h1 id="search-suggestions-dialog-header">Search code, repositories, users, issues, pull requests...</h1>
+              <aside>Repository sidebar noise</aside>
+              <main>
+                <h1><bdi data-testid="issue-title">Improve parser diagnostics</bdi></h1>
+                <div class="markdown-body"><p>Issue body with useful reproduction details.</p></div>
+                <div class="timeline-comment">
+                  <a class="author">alice</a>
+                  <div class="markdown-body"><p>First comment should be preserved.</p></div>
+                </div>
+              </main>
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/repo-issue", server.uri()))
+        .arg("--source-url")
+        .arg("https://github.com/acme/widgets/issues/42")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Improve parser diagnostics"))
+        .stdout(predicate::str::contains("Search code, repositories").not())
+        .stdout(predicate::str::contains(
+            "Issue body with useful reproduction details.",
+        ))
+        .stdout(predicate::str::contains(
+            "First comment should be preserved.",
+        ))
+        .stdout(predicate::str::contains("Repository sidebar noise").not());
+}
+
+#[tokio::test]
+async fn source_url_prefers_known_encyclopedia_content_selector() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/wiki"))
+        .respond_with(html_response(
+            r#"
+            <html><body>
+              <main>
+                <div class="sidebar">Navigation box should not win.</div>
+                <h1 id="firstHeading">Parser Combinators</h1>
+                <div id="mw-content-text">
+                  <p>Parser combinators are a technique for building parsers from small functions.</p>
+                </div>
+              </main>
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/wiki", server.uri()))
+        .arg("--source-url")
+        .arg("https://en.wikipedia.org/wiki/Parser_combinator")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Parser Combinators"))
+        .stdout(predicate::str::contains(
+            "Parser combinators are a technique",
+        ))
+        .stdout(predicate::str::contains("Navigation box should not win").not());
+}
+
+#[tokio::test]
 async fn retries_with_bot_user_agent_when_initial_page_has_no_extractable_content() {
     let server = MockServer::start().await;
 
@@ -273,6 +390,134 @@ This bot-rendered body keeps **Markdown** syntax intact.
             "- [recovered link](https://example.com/recovered)",
         ))
         .stderr(predicate::str::is_empty());
+}
+
+#[tokio::test]
+async fn json_debug_records_bot_user_agent_fallback() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/bot-debug"))
+        .and(header("user-agent", DEFAULT_USER_AGENT))
+        .respond_with(html_response(
+            r#"<html><head><title>Bot Debug</title></head><body><div id="app"></div><script>hydrate()</script></body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/bot-debug"))
+        .and(header("user-agent", BOT_USER_AGENT))
+        .respond_with(html_response(
+            r#"
+            <html><head><title>Bot Debug</title></head><body>
+# Bot Debug
+
+This fallback markdown body came from the bot user agent.
+            </body></html>
+            "#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/bot-debug", server.uri()))
+        .arg("--json")
+        .arg("--debug")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["debug"]["extractionPath"], "html");
+    assert_eq!(
+        json["debug"]["fallbacks"],
+        Value::Array(vec![Value::String("bot-user-agent".to_string())])
+    );
+}
+
+#[tokio::test]
+async fn json_debug_records_hidden_content_fallback() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/hidden-article"))
+        .respond_with(html_response(
+            r#"
+            <html><head><title>Hidden Article</title></head><body>
+              <article hidden>
+                <h1>Hidden Article</h1>
+                <p>This useful article is hidden in the raw HTML but can still be recovered.</p>
+              </article>
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/hidden-article", server.uri()))
+        .arg("--json")
+        .arg("--debug")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["debug"]["contentSelector"], "article");
+    assert!(json["debug"]["fallbacks"]
+        .as_array()
+        .unwrap()
+        .contains(&Value::String("hidden-content".to_string())));
+    assert!(json["markdown"]
+        .as_str()
+        .unwrap()
+        .contains("Hidden Article"));
+}
+
+#[tokio::test]
+async fn json_debug_recovers_hidden_content_when_visible_body_is_shell_text() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/hidden-shell"))
+        .respond_with(html_response(
+            r#"
+            <html><head><title>Hidden Shell</title></head><body>
+              <main>
+                <div id="app">Loading...</div>
+                <article hidden>
+                  <h1>Hidden Shell Article</h1>
+                  <p>This hidden article has useful words that should beat the visible loading shell.</p>
+                </article>
+              </main>
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/hidden-shell", server.uri()))
+        .arg("--json")
+        .arg("--debug")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(json["debug"]["fallbacks"]
+        .as_array()
+        .unwrap()
+        .contains(&Value::String("hidden-content".to_string())));
+    assert!(json["markdown"]
+        .as_str()
+        .unwrap()
+        .contains("Hidden Shell Article"));
+    assert!(!json["markdown"].as_str().unwrap().contains("Loading..."));
 }
 
 #[tokio::test]
@@ -571,4 +816,830 @@ async fn debug_emits_diagnostics_to_stderr_without_polluting_stdout() {
         .stdout(predicate::str::contains("debug:").not())
         .stderr(predicate::str::contains("debug: fetched"))
         .stderr(predicate::str::contains("debug: extracted"));
+}
+
+#[tokio::test]
+async fn debug_classifies_spa_shell_extraction_failures() {
+    let server = MockServer::start().await;
+    let shell = r#"
+        <html><head><title>Client App</title></head>
+        <body><div id="root"></div><script src="/assets/app.js"></script></body></html>
+    "#;
+    Mock::given(method("GET"))
+        .and(path("/app"))
+        .and(header("user-agent", DEFAULT_USER_AGENT))
+        .respond_with(html_response(shell))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/app"))
+        .and(header("user-agent", BOT_USER_AGENT))
+        .respond_with(html_response(shell))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/app", server.uri()))
+        .arg("--debug")
+        .assert()
+        .failure()
+        .code(7)
+        .stderr(predicate::str::contains(
+            "debug: extraction failed: spa-shell",
+        ));
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn render_auto_uses_external_renderer_after_static_extraction_fails() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/spa"))
+        .and(header("user-agent", DEFAULT_USER_AGENT))
+        .respond_with(html_response(
+            r#"<html><body><div id="root"></div><script>hydrate()</script></body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let dir = tempdir().unwrap();
+    let renderer = dir.path().join("renderer.sh");
+    std::fs::write(
+        &renderer,
+        r#"#!/bin/sh
+cat <<'HTML'
+<html><body><article><h1>Rendered Article</h1><p>Hydrated content from renderer.</p></article></body></html>
+HTML
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&renderer).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&renderer, permissions).unwrap();
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/spa", server.uri()))
+        .arg("--render=auto")
+        .env("CHIDORI_RENDER_COMMAND", &renderer)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Rendered Article"))
+        .stdout(predicate::str::contains("Hydrated content from renderer."));
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn render_auto_uses_external_renderer_for_placeholder_spa_shell() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/placeholder-spa"))
+        .and(header("user-agent", DEFAULT_USER_AGENT))
+        .respond_with(html_response(
+            r#"
+            <html>
+              <body>
+                <main><div id="root">Loading...</div></main>
+                <script>hydrate()</script>
+              </body>
+            </html>
+            "#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let dir = tempdir().unwrap();
+    let renderer = dir.path().join("renderer.sh");
+    std::fs::write(
+        &renderer,
+        r#"#!/bin/sh
+cat <<'HTML'
+<html><body><article><h1>Rendered Placeholder Shell</h1><p>The renderer supplied real hydrated content.</p></article></body></html>
+HTML
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&renderer).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&renderer, permissions).unwrap();
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/placeholder-spa", server.uri()))
+        .arg("--render=auto")
+        .env("CHIDORI_RENDER_COMMAND", &renderer)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Rendered Placeholder Shell"))
+        .stdout(predicate::str::contains(
+            "The renderer supplied real hydrated content.",
+        ))
+        .stdout(predicate::str::contains("Loading...").not());
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn render_auto_allows_renderer_command_arguments() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/spa-with-render-args"))
+        .and(header("user-agent", DEFAULT_USER_AGENT))
+        .respond_with(html_response(
+            r#"<html><body><div id="root"></div><script>hydrate()</script></body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let dir = tempdir().unwrap();
+    let renderer = dir.path().join("renderer.sh");
+    std::fs::write(
+        &renderer,
+        r#"#!/bin/sh
+if [ "$1" != "--fixture" ] || [ "$2" != "rendered" ]; then
+  exit 2
+fi
+cat <<'HTML'
+<html><body><article><h1>Rendered With Args</h1><p>Renderer arguments were preserved.</p></article></body></html>
+HTML
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&renderer).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&renderer, permissions).unwrap();
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/spa-with-render-args", server.uri()))
+        .arg("--render=auto")
+        .env(
+            "CHIDORI_RENDER_COMMAND",
+            format!("{} --fixture rendered", renderer.display()),
+        )
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Rendered With Args"))
+        .stdout(predicate::str::contains(
+            "Renderer arguments were preserved.",
+        ));
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn render_auto_preserves_literal_renderer_paths_with_spaces() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/spa-with-space-path-renderer"))
+        .and(header("user-agent", DEFAULT_USER_AGENT))
+        .respond_with(html_response(
+            r#"<html><body><div id="root"></div><script>hydrate()</script></body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let dir = tempdir().unwrap();
+    let renderer_dir = dir.path().join("renderer dir");
+    std::fs::create_dir(&renderer_dir).unwrap();
+    let renderer = renderer_dir.join("renderer.sh");
+    std::fs::write(
+        &renderer,
+        r#"#!/bin/sh
+cat <<'HTML'
+<html><body><article><h1>Rendered Space Path</h1><p>Literal renderer path was preserved.</p></article></body></html>
+HTML
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&renderer).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&renderer, permissions).unwrap();
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/spa-with-space-path-renderer", server.uri()))
+        .arg("--render=auto")
+        .env("CHIDORI_RENDER_COMMAND", &renderer)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Rendered Space Path"))
+        .stdout(predicate::str::contains(
+            "Literal renderer path was preserved.",
+        ));
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn render_auto_times_out_external_renderer() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/slow-renderer"))
+        .and(header("user-agent", "ChidoriTest/2.0"))
+        .respond_with(html_response(
+            r#"<html><body><div id="root"></div><script>hydrate()</script></body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let dir = tempdir().unwrap();
+    let renderer = dir.path().join("slow-renderer.sh");
+    std::fs::write(
+        &renderer,
+        r#"#!/bin/sh
+sleep 2
+cat <<'HTML'
+<html><body><article><h1>Late Rendered Article</h1><p>This should arrive too late.</p></article></body></html>
+HTML
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&renderer).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&renderer, permissions).unwrap();
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let started = Instant::now();
+    cmd.arg(format!("{}/slow-renderer", server.uri()))
+        .arg("--render=auto")
+        .arg("--timeout")
+        .arg("50")
+        .arg("--user-agent")
+        .arg("ChidoriTest/2.0")
+        .env("CHIDORI_RENDER_COMMAND", &renderer)
+        .assert()
+        .failure()
+        .code(4)
+        .stderr(predicate::str::contains(
+            "timed out fetching page after 50 ms",
+        ));
+    assert!(started.elapsed() < Duration::from_millis(1500));
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn render_auto_reports_renderer_stderr_on_failure() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/failing-renderer"))
+        .and(header("user-agent", "ChidoriTest/2.0"))
+        .respond_with(html_response(
+            r#"<html><body><div id="root"></div><script>hydrate()</script></body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let dir = tempdir().unwrap();
+    let renderer = dir.path().join("failing-renderer.sh");
+    std::fs::write(
+        &renderer,
+        r#"#!/bin/sh
+echo "renderer panic details" >&2
+exit 2
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&renderer).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&renderer, permissions).unwrap();
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/failing-renderer", server.uri()))
+        .arg("--render=auto")
+        .arg("--user-agent")
+        .arg("ChidoriTest/2.0")
+        .env("CHIDORI_RENDER_COMMAND", &renderer)
+        .assert()
+        .failure()
+        .code(3)
+        .stderr(predicate::str::contains("renderer panic details"));
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn render_auto_rejects_renderer_output_over_fetch_limit() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/huge-renderer-output"))
+        .and(header("user-agent", "ChidoriTest/2.0"))
+        .respond_with(html_response(
+            r#"<html><body><div id="root"></div><script>hydrate()</script></body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let dir = tempdir().unwrap();
+    let renderer = dir.path().join("huge-renderer.sh");
+    std::fs::write(
+        &renderer,
+        r#"#!/bin/sh
+printf '<html><body><article><h1>Rendered Too Large</h1><p>'
+yes word | head -c 5500000
+printf '</p></article></body></html>'
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&renderer).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&renderer, permissions).unwrap();
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/huge-renderer-output", server.uri()))
+        .arg("--render=auto")
+        .arg("--max-chars")
+        .arg("20")
+        .arg("--user-agent")
+        .arg("ChidoriTest/2.0")
+        .env("CHIDORI_RENDER_COMMAND", &renderer)
+        .assert()
+        .failure()
+        .code(5)
+        .stderr(predicate::str::contains("page too large"));
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn render_auto_times_out_waiting_for_renderer_descendant_stdout() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/forking-renderer"))
+        .and(header("user-agent", "ChidoriTest/2.0"))
+        .respond_with(html_response(
+            r#"<html><body><div id="root"></div><script>hydrate()</script></body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let dir = tempdir().unwrap();
+    let renderer = dir.path().join("forking-renderer.py");
+    std::fs::write(
+        &renderer,
+        r#"#!/usr/bin/env python3
+import os
+import sys
+import time
+
+pid = os.fork()
+if pid:
+    os._exit(0)
+time.sleep(1)
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&renderer).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&renderer, permissions).unwrap();
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/forking-renderer", server.uri()))
+        .arg("--render=auto")
+        .arg("--timeout")
+        .arg("500")
+        .arg("--user-agent")
+        .arg("ChidoriTest/2.0")
+        .env("CHIDORI_RENDER_COMMAND", &renderer)
+        .assert()
+        .failure()
+        .code(4)
+        .stderr(predicate::str::contains(
+            "timed out fetching page after 500 ms",
+        ));
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn render_auto_waits_for_descendant_stdout_after_renderer_parent_exits() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/forking-output-renderer"))
+        .and(header("user-agent", "ChidoriTest/2.0"))
+        .respond_with(html_response(
+            r#"<html><body><div id="root"></div><script>hydrate()</script></body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let dir = tempdir().unwrap();
+    let renderer = dir.path().join("forking-output-renderer.py");
+    std::fs::write(
+        &renderer,
+        r#"#!/usr/bin/env python3
+import os
+import sys
+import time
+
+sys.stdout.write("<html><body><article><h1>Delayed Renderer</h1><p>")
+sys.stdout.flush()
+pid = os.fork()
+if pid:
+    os._exit(0)
+time.sleep(0.2)
+sys.stdout.write("The descendant supplied the rest of the rendered content.</p></article></body></html>")
+sys.stdout.flush()
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&renderer).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&renderer, permissions).unwrap();
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/forking-output-renderer", server.uri()))
+        .arg("--render=auto")
+        .arg("--timeout")
+        .arg("5000")
+        .arg("--user-agent")
+        .arg("ChidoriTest/2.0")
+        .env("CHIDORI_RENDER_COMMAND", &renderer)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Delayed Renderer"))
+        .stdout(predicate::str::contains(
+            "The descendant supplied the rest of the rendered content.",
+        ));
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn render_auto_fails_fast_when_renderer_outputs_nothing() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/empty-renderer"))
+        .and(header("user-agent", "ChidoriTest/2.0"))
+        .respond_with(html_response(
+            r#"<html><body><div id="root"></div><script>hydrate()</script></body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let dir = tempdir().unwrap();
+    let renderer = dir.path().join("empty-renderer.sh");
+    std::fs::write(
+        &renderer,
+        r#"#!/bin/sh
+exit 0
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&renderer).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&renderer, permissions).unwrap();
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let started = Instant::now();
+    cmd.arg(format!("{}/empty-renderer", server.uri()))
+        .arg("--render=auto")
+        .arg("--timeout")
+        .arg("2000")
+        .arg("--user-agent")
+        .arg("ChidoriTest/2.0")
+        .env("CHIDORI_RENDER_COMMAND", &renderer)
+        .assert()
+        .failure()
+        .code(7)
+        .stderr(predicate::str::contains("no content could be extracted"));
+    assert!(started.elapsed() < Duration::from_millis(1500));
+}
+
+#[tokio::test]
+async fn render_auto_falls_back_to_bot_user_agent_when_renderer_is_unavailable() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/bot-render-auto"))
+        .and(header("user-agent", DEFAULT_USER_AGENT))
+        .respond_with(html_response(
+            r#"<html><body><div id="root"></div><script>hydrate()</script></body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/bot-render-auto"))
+        .and(header("user-agent", BOT_USER_AGENT))
+        .respond_with(html_response(
+            r#"
+            <html><body>
+              <article>
+                <h1>Bot Render Auto</h1>
+                <p>The bot user-agent fallback still runs when rendering is unavailable.</p>
+              </article>
+            </body></html>
+            "#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/bot-render-auto", server.uri()))
+        .arg("--render=auto")
+        .env_remove("CHIDORI_RENDER_COMMAND")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Bot Render Auto"))
+        .stdout(predicate::str::contains(
+            "The bot user-agent fallback still runs",
+        ));
+}
+
+#[tokio::test]
+async fn debug_classifies_unsupported_content_type_fetch_failures() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/json"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "application/json")
+                .set_body_string("{}"),
+        )
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/json", server.uri()))
+        .arg("--debug")
+        .assert()
+        .failure()
+        .code(6)
+        .stderr(predicate::str::contains(
+            "debug: fetch failed: unsupported-content-type",
+        ));
+}
+
+#[tokio::test]
+async fn debug_classifies_blocked_or_login_fetch_failures() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/login"))
+        .respond_with(ResponseTemplate::new(403).set_body_string("Forbidden"))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/login", server.uri()))
+        .arg("--debug")
+        .assert()
+        .failure()
+        .code(3)
+        .stderr(predicate::str::contains(
+            "debug: fetch failed: blocked-or-login",
+        ));
+}
+
+#[tokio::test]
+async fn debug_classifies_link_dense_extraction_failures() {
+    let server = MockServer::start().await;
+    let links = (0..80)
+        .map(|index| format!(r#"<a href="/{index}">Link {index}</a>"#))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let html = format!("<html><body><main>{links}</main></body></html>");
+    Mock::given(method("GET"))
+        .and(path("/links"))
+        .and(header("user-agent", DEFAULT_USER_AGENT))
+        .respond_with(html_response(&html))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/links"))
+        .and(header("user-agent", BOT_USER_AGENT))
+        .respond_with(html_response(&html))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/links", server.uri()))
+        .arg("--debug")
+        .assert()
+        .failure()
+        .code(7)
+        .stderr(predicate::str::contains(
+            "debug: extraction failed: too-link-dense",
+        ));
+}
+
+#[tokio::test]
+async fn markdown_body_with_headings_can_be_link_dense_readable_content() {
+    let server = MockServer::start().await;
+    let links = (0..30)
+        .map(|index| format!(r#"<li><a href="/project-{index}">Project {index}</a></li>"#))
+        .collect::<Vec<_>>()
+        .join("");
+    let html = format!(
+        r#"
+        <html><body>
+          <main class="markdown-body">
+            <h1>Awesome Parser Tools</h1>
+            <h2>Libraries</h2>
+            <ul>{links}</ul>
+          </main>
+        </body></html>
+        "#
+    );
+    Mock::given(method("GET"))
+        .and(path("/awesome"))
+        .respond_with(html_response(&html))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/awesome", server.uri()))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Awesome Parser Tools"))
+        .stdout(predicate::str::contains("[Project 29](/project-29)"));
+}
+
+#[tokio::test]
+async fn markdown_body_without_structure_remains_too_link_dense() {
+    let server = MockServer::start().await;
+    let links = (0..30)
+        .map(|index| format!(r#"<a href="/project-{index}">Project {index}</a>"#))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let html = format!(
+        r#"
+        <html><body>
+          <main class="markdown-body">{links}</main>
+        </body></html>
+        "#
+    );
+    Mock::given(method("GET"))
+        .and(path("/unstructured-awesome"))
+        .and(header("user-agent", DEFAULT_USER_AGENT))
+        .respond_with(html_response(&html))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/unstructured-awesome"))
+        .and(header("user-agent", BOT_USER_AGENT))
+        .respond_with(html_response(&html))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/unstructured-awesome", server.uri()))
+        .arg("--debug")
+        .assert()
+        .failure()
+        .code(7)
+        .stderr(predicate::str::contains(
+            "debug: extraction failed: too-link-dense",
+        ));
+}
+
+#[tokio::test]
+async fn json_debug_includes_structured_extraction_diagnostics() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/debug-json"))
+        .respond_with(html_response(
+            r#"
+            <html><head><title>Debug JSON Article</title></head><body>
+              <nav>Menu</nav>
+              <article><h1>Debug JSON Article</h1><p>Debug JSON body.</p></article>
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/debug-json", server.uri()))
+        .arg("--json")
+        .arg("--debug")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["title"], "Debug JSON Article");
+    assert_eq!(json["debug"]["extractionPath"], "html");
+    assert_eq!(json["debug"]["fallbacks"], Value::Array(vec![]));
+    assert!(json["debug"]["wordCount"].as_u64().unwrap() > 0);
+    assert!(json["debug"]["timings"]["totalMs"].as_u64().is_some());
+}
+
+#[tokio::test]
+async fn json_debug_includes_selected_content_candidate_details() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/candidate-debug"))
+        .respond_with(html_response(
+            r#"
+            <html><head><title>Candidate Debug</title></head><body>
+              <main><p>Short shell.</p></main>
+              <article>
+                <h1>Candidate Debug</h1>
+                <p>This article body has enough useful words to win the extraction candidate.</p>
+              </article>
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/candidate-debug", server.uri()))
+        .arg("--json")
+        .arg("--debug")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["debug"]["contentSelector"], "article");
+    assert!(json["debug"]["contentScore"].as_i64().unwrap() > 0);
+}
+
+#[tokio::test]
+async fn json_debug_includes_cleanup_removal_reasons() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/removal-debug"))
+        .respond_with(html_response(
+            r#"
+            <html><head><title>Removal Debug</title></head><body>
+              <article>
+                <h1>Removal Debug</h1>
+                <nav>Article-local menu</nav>
+                <p>Useful body survives cleanup.</p>
+              </article>
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/removal-debug", server.uri()))
+        .arg("--json")
+        .arg("--debug")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let removals = json["debug"]["removals"].as_array().unwrap();
+    assert!(removals.iter().any(|removal| {
+        removal["step"] == "clean-html"
+            && removal["reason"] == "noise-tag"
+            && removal["selector"] == "nav"
+    }));
+    assert!(!json["markdown"]
+        .as_str()
+        .unwrap()
+        .contains("Article-local menu"));
+}
+
+#[tokio::test]
+async fn json_debug_reports_body_selector_after_low_word_retry() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/body-retry-debug"))
+        .respond_with(html_response(
+            r#"
+            <html><head><title>Body Retry</title></head><body>
+              <article><p>Stub.</p></article>
+              <div class="docs-page">
+                <h1>Recovered Docs</h1>
+                <p>This useful documentation section is recovered by the body retry path.</p>
+                <p>It contains enough words to beat the placeholder article candidate.</p>
+              </div>
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/body-retry-debug", server.uri()))
+        .arg("--json")
+        .arg("--debug")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["debug"]["contentSelector"], "body");
+    assert!(json["markdown"]
+        .as_str()
+        .unwrap()
+        .contains("Recovered Docs"));
 }
