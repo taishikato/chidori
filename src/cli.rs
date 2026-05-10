@@ -464,13 +464,23 @@ fn terminate_renderer(child: &mut std::process::Child) {
     #[cfg(windows)]
     {
         let _ = Command::new("taskkill")
-            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .args(windows_process_tree_kill_args(child.id()))
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
     }
     let _ = child.kill();
     let _ = child.try_wait();
+}
+
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+fn windows_process_tree_kill_args(pid: u32) -> Vec<String> {
+    vec![
+        "/PID".to_string(),
+        pid.to_string(),
+        "/T".to_string(),
+        "/F".to_string(),
+    ]
 }
 
 fn render_command_parts(command: &str) -> Result<(String, Vec<String>), ChidoriError> {
@@ -572,11 +582,7 @@ fn is_too_link_dense(html: &str) -> bool {
     (link_text_len as f64 / text_len as f64) > 0.9
 }
 
-fn is_readable_link_dense_content(html: &str, selector: Option<&str>) -> bool {
-    if selector.is_some_and(|selector| selector.contains("markdown-body")) {
-        return true;
-    }
-
+fn is_readable_link_dense_content(html: &str) -> bool {
     let dom = scraper::Html::parse_fragment(html);
     let root = dom.root_element();
     let Ok(heading_selector) = scraper::Selector::parse("h1, h2, h3") else {
@@ -675,7 +681,7 @@ fn extract_markdown_from_doc(
             let content_title = crate::metadata::title_from_html_fragment(&cleaned.html);
             if content.score.is_some()
                 && is_too_link_dense(&cleaned.html)
-                && !is_readable_link_dense_content(&cleaned.html, content.selector.as_deref())
+                && !is_readable_link_dense_content(&cleaned.html)
             {
                 return Err(ChidoriError::ExtractionFailed);
             }
@@ -731,4 +737,17 @@ fn is_low_information_spa_shell(doc: &crate::document::ParsedDocument, markdown:
         ]
         .iter()
         .any(|marker| html.contains(marker))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windows_process_tree_kill_args_include_tree_and_force_flags() {
+        assert_eq!(
+            windows_process_tree_kill_args(1234),
+            vec!["/PID", "1234", "/T", "/F"]
+        );
+    }
 }

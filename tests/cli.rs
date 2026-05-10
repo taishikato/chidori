@@ -27,16 +27,6 @@ fn help_mentions_agent_first_options() {
 }
 
 #[test]
-fn renderer_termination_includes_windows_process_tree_kill() {
-    let source = std::fs::read_to_string("src/cli.rs").unwrap();
-
-    assert!(source.contains("#[cfg(windows)]"));
-    assert!(source.contains("taskkill"));
-    assert!(source.contains("\"/T\""));
-    assert!(source.contains("\"/F\""));
-}
-
-#[test]
 fn version_prints_package_version() {
     let mut cmd = Command::cargo_bin("chidori").unwrap();
     cmd.arg("--version")
@@ -1468,6 +1458,46 @@ async fn markdown_body_with_headings_can_be_link_dense_readable_content() {
         .success()
         .stdout(predicate::str::contains("# Awesome Parser Tools"))
         .stdout(predicate::str::contains("[Project 29](/project-29)"));
+}
+
+#[tokio::test]
+async fn markdown_body_without_structure_remains_too_link_dense() {
+    let server = MockServer::start().await;
+    let links = (0..30)
+        .map(|index| format!(r#"<a href="/project-{index}">Project {index}</a>"#))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let html = format!(
+        r#"
+        <html><body>
+          <main class="markdown-body">{links}</main>
+        </body></html>
+        "#
+    );
+    Mock::given(method("GET"))
+        .and(path("/unstructured-awesome"))
+        .and(header("user-agent", DEFAULT_USER_AGENT))
+        .respond_with(html_response(&html))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/unstructured-awesome"))
+        .and(header("user-agent", BOT_USER_AGENT))
+        .respond_with(html_response(&html))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/unstructured-awesome", server.uri()))
+        .arg("--debug")
+        .assert()
+        .failure()
+        .code(7)
+        .stderr(predicate::str::contains(
+            "debug: extraction failed: too-link-dense",
+        ));
 }
 
 #[tokio::test]
