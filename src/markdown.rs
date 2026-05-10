@@ -360,7 +360,7 @@ impl SpecializedHtml {
             if let Some(best_src) = attr_value(opening_tag, "srcset")
                 .and_then(|srcset| largest_srcset_candidate(&srcset).map(ToString::to_string))
             {
-                output.push_str(&replace_attr_value(opening_tag, "src", &best_src));
+                output.push_str(&set_attr_value(opening_tag, "src", &best_src));
             } else {
                 output.push_str(opening_tag);
             }
@@ -770,15 +770,37 @@ fn srcset_descriptor_score(descriptor: &str) -> Option<usize> {
         })
 }
 
-fn replace_attr_value(opening_tag: &str, name: &str, value: &str) -> String {
-    let Some((value_start, value_end)) = attr_value_range(opening_tag, name) else {
-        return opening_tag.to_string();
+fn set_attr_value(opening_tag: &str, name: &str, value: &str) -> String {
+    if let Some((value_start, value_end)) = attr_value_range(opening_tag, name) {
+        let mut output = String::with_capacity(opening_tag.len() + value.len());
+        output.push_str(&opening_tag[..value_start]);
+        output.push_str(&html_escape::encode_double_quoted_attribute(value));
+        output.push_str(&opening_tag[value_end..]);
+        return output;
+    }
+
+    insert_attr_value(opening_tag, name, value)
+}
+
+fn insert_attr_value(opening_tag: &str, name: &str, value: &str) -> String {
+    let close_start = opening_tag.rfind('>').unwrap_or(opening_tag.len());
+    let before_close = &opening_tag[..close_start];
+    let trimmed_end = before_close.trim_end().len();
+    let insert_at = if before_close[..trimmed_end].ends_with('/') {
+        trimmed_end.saturating_sub('/'.len_utf8())
+    } else {
+        close_start
     };
 
-    let mut output = String::with_capacity(opening_tag.len() + value.len());
-    output.push_str(&opening_tag[..value_start]);
-    output.push_str(&html_escape::encode_double_quoted_attribute(value));
-    output.push_str(&opening_tag[value_end..]);
+    let escaped = html_escape::encode_double_quoted_attribute(value);
+    let mut output = String::with_capacity(opening_tag.len() + name.len() + escaped.len() + 4);
+    output.push_str(&opening_tag[..insert_at]);
+    output.push(' ');
+    output.push_str(name);
+    output.push_str("=\"");
+    output.push_str(&escaped);
+    output.push('"');
+    output.push_str(&opening_tag[insert_at..]);
     output
 }
 

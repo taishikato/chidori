@@ -36,8 +36,10 @@ CHIDORI_RENDER_COMMAND=/path/to/render-page chidori https://example.com --render
 
 `--render=auto` is an optional fallback for JavaScript-heavy pages. When static
 extraction fails or only finds a short app shell, `chidori` runs
-`CHIDORI_RENDER_COMMAND <url>` and expects rendered HTML on stdout. Renderer
-output uses the same timeout and 5 MiB fetch limit.
+`CHIDORI_RENDER_COMMAND <url>` if configured and expects rendered HTML on stdout.
+If the renderer is unavailable and no custom user agent was supplied, `chidori`
+still tries its bot user-agent fallback. Renderer output uses the same timeout
+and 5 MiB fetch limit.
 
 ### External renderer example
 

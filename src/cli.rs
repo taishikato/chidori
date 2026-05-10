@@ -4,7 +4,7 @@ use clap::{Parser, ValueEnum};
 use std::fmt;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{ChildStdout, Command, Stdio};
+use std::process::{ChildStderr, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::mpsc::{self, TryRecvError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -12,6 +12,8 @@ use url::Url;
 
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
+
+const RENDERER_STDERR_LIMIT: usize = 64 * 1024;
 
 #[derive(Debug, Parser)]
 #[command(name = "chidori")]
@@ -310,7 +312,7 @@ fn render_with_external_command(
         .args(args)
         .arg(url.as_str())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
     #[cfg(unix)]
     unsafe {
         command.pre_exec(|| {
@@ -328,7 +330,12 @@ fn render_with_external_command(
         .stdout
         .take()
         .ok_or_else(|| ChidoriError::FetchFailed("renderer stdout unavailable".to_string()))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| ChidoriError::FetchFailed("renderer stderr unavailable".to_string()))?;
     let stdout_reader = read_renderer_stdout_in_background(stdout, max_bytes);
+    let stderr_reader = read_renderer_stderr_in_background(stderr, RENDERER_STDERR_LIMIT);
     let started = Instant::now();
     let mut status = None;
     let mut output = None;
@@ -360,10 +367,7 @@ fn render_with_external_command(
         if status.as_ref().is_some_and(|status| !status.success()) {
             let status = status.expect("renderer status checked before loop exits");
             terminate_renderer(&mut child);
-            return Err(ChidoriError::FetchFailed(format!(
-                "renderer exited with status {}",
-                status
-            )));
+            return Err(renderer_exit_error(status, &stderr_reader));
         }
 
         if status.is_some() && output.is_some() {
@@ -413,10 +417,57 @@ fn read_renderer_stdout_in_background(
     receiver
 }
 
+fn read_renderer_stderr_in_background(
+    mut stderr: ChildStderr,
+    max_bytes: usize,
+) -> mpsc::Receiver<Vec<u8>> {
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let mut output = Vec::new();
+        let mut buffer = [0_u8; 8192];
+        loop {
+            match stderr.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(bytes_read) => {
+                    let remaining = max_bytes.saturating_sub(output.len());
+                    output.extend_from_slice(&buffer[..bytes_read.min(remaining)]);
+                }
+                Err(_) => break,
+            }
+        }
+        let _ = sender.send(output);
+    });
+    receiver
+}
+
+fn renderer_exit_error(
+    status: ExitStatus,
+    stderr_reader: &mpsc::Receiver<Vec<u8>>,
+) -> ChidoriError {
+    let stderr = stderr_reader
+        .recv_timeout(Duration::from_millis(100))
+        .unwrap_or_default();
+    let stderr = String::from_utf8_lossy(&stderr);
+    let stderr = stderr.trim();
+    if stderr.is_empty() {
+        return ChidoriError::FetchFailed(format!("renderer exited with status {status}"));
+    }
+
+    ChidoriError::FetchFailed(format!("renderer exited with status {status}: {stderr}"))
+}
+
 fn terminate_renderer(child: &mut std::process::Child) {
     #[cfg(unix)]
     unsafe {
         let _ = libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL);
+    }
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
     }
     let _ = child.kill();
     let _ = child.try_wait();
@@ -521,6 +572,31 @@ fn is_too_link_dense(html: &str) -> bool {
     (link_text_len as f64 / text_len as f64) > 0.9
 }
 
+fn is_readable_link_dense_content(html: &str, selector: Option<&str>) -> bool {
+    if selector.is_some_and(|selector| selector.contains("markdown-body")) {
+        return true;
+    }
+
+    let dom = scraper::Html::parse_fragment(html);
+    let root = dom.root_element();
+    let Ok(heading_selector) = scraper::Selector::parse("h1, h2, h3") else {
+        return false;
+    };
+    let heading_text = root
+        .select(&heading_selector)
+        .map(|heading| heading.text().collect::<Vec<_>>().join(" "))
+        .collect::<Vec<_>>()
+        .join(" ");
+    if heading_text.split_whitespace().count() < 2 {
+        return false;
+    }
+
+    let Ok(item_selector) = scraper::Selector::parse("li") else {
+        return false;
+    };
+    root.select(&item_selector).count() >= 5
+}
+
 #[derive(Debug, Clone)]
 struct ExtractionResult {
     markdown: String,
@@ -597,7 +673,10 @@ fn extract_markdown_from_doc(
                 },
             );
             let content_title = crate::metadata::title_from_html_fragment(&cleaned.html);
-            if content.score.is_some() && is_too_link_dense(&cleaned.html) {
+            if content.score.is_some()
+                && is_too_link_dense(&cleaned.html)
+                && !is_readable_link_dense_content(&cleaned.html, content.selector.as_deref())
+            {
                 return Err(ChidoriError::ExtractionFailed);
             }
             (

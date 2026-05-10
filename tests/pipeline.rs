@@ -3,7 +3,7 @@ use chidori::{
     document::ParsedDocument,
     extractor::{extract_main_content, extract_main_html},
     markdown::{extract_raw_markdown, html_to_markdown, remove_markdown_images, MarkdownOptions},
-    metadata::{extract_metadata, Metadata},
+    metadata::{extract_metadata, extract_metadata_with_content_title, Metadata},
     output::{render_output, RenderMode},
 };
 use url::Url;
@@ -90,6 +90,24 @@ fn extracts_canonical_meta_tags_and_richer_article_metadata() {
         tag.name.as_deref() == Some("description")
             && tag.content.as_deref() == Some("A richer article")
     }));
+}
+
+#[test]
+fn chrome_blocker_titles_yield_to_extracted_content_title() {
+    let html = r#"<!doctype html>
+    <html>
+      <head><title>Just a moment...</title></head>
+      <body>
+        <article>
+          <h1>Real Article Title</h1>
+          <p>Hello world.</p>
+        </article>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata_with_content_title(&doc, Some("Real Article Title"));
+
+    assert_eq!(metadata.title, "Real Article Title");
 }
 
 #[test]
@@ -1401,6 +1419,18 @@ fn preserves_figure_captions_and_prefers_largest_srcset_image() {
 
     assert!(markdown.contains("![Architecture diagram](/large.png)"));
     assert!(markdown.contains("System architecture overview."));
+}
+
+#[test]
+fn inserts_markdown_image_source_from_srcset_when_src_is_missing() {
+    let html = r#"
+    <article>
+      <img srcset="/small.png 320w, /large.png 1200w" alt="Responsive diagram">
+    </article>
+    "#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("![Responsive diagram](/large.png)"));
 }
 
 #[test]

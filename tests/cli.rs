@@ -27,6 +27,16 @@ fn help_mentions_agent_first_options() {
 }
 
 #[test]
+fn renderer_termination_includes_windows_process_tree_kill() {
+    let source = std::fs::read_to_string("src/cli.rs").unwrap();
+
+    assert!(source.contains("#[cfg(windows)]"));
+    assert!(source.contains("taskkill"));
+    assert!(source.contains("\"/T\""));
+    assert!(source.contains("\"/F\""));
+}
+
+#[test]
 fn version_prints_package_version() {
     let mut cmd = Command::cargo_bin("chidori").unwrap();
     cmd.arg("--version")
@@ -1079,6 +1089,46 @@ HTML
 
 #[tokio::test]
 #[cfg(unix)]
+async fn render_auto_reports_renderer_stderr_on_failure() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/failing-renderer"))
+        .and(header("user-agent", "ChidoriTest/2.0"))
+        .respond_with(html_response(
+            r#"<html><body><div id="root"></div><script>hydrate()</script></body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let dir = tempdir().unwrap();
+    let renderer = dir.path().join("failing-renderer.sh");
+    std::fs::write(
+        &renderer,
+        r#"#!/bin/sh
+echo "renderer panic details" >&2
+exit 2
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&renderer).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&renderer, permissions).unwrap();
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/failing-renderer", server.uri()))
+        .arg("--render=auto")
+        .arg("--user-agent")
+        .arg("ChidoriTest/2.0")
+        .env("CHIDORI_RENDER_COMMAND", &renderer)
+        .assert()
+        .failure()
+        .code(3)
+        .stderr(predicate::str::contains("renderer panic details"));
+}
+
+#[tokio::test]
+#[cfg(unix)]
 async fn render_auto_rejects_renderer_output_over_fetch_limit() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -1386,6 +1436,38 @@ async fn debug_classifies_link_dense_extraction_failures() {
         .stderr(predicate::str::contains(
             "debug: extraction failed: too-link-dense",
         ));
+}
+
+#[tokio::test]
+async fn markdown_body_with_headings_can_be_link_dense_readable_content() {
+    let server = MockServer::start().await;
+    let links = (0..30)
+        .map(|index| format!(r#"<li><a href="/project-{index}">Project {index}</a></li>"#))
+        .collect::<Vec<_>>()
+        .join("");
+    let html = format!(
+        r#"
+        <html><body>
+          <main class="markdown-body">
+            <h1>Awesome Parser Tools</h1>
+            <h2>Libraries</h2>
+            <ul>{links}</ul>
+          </main>
+        </body></html>
+        "#
+    );
+    Mock::given(method("GET"))
+        .and(path("/awesome"))
+        .respond_with(html_response(&html))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/awesome", server.uri()))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Awesome Parser Tools"))
+        .stdout(predicate::str::contains("[Project 29](/project-29)"));
 }
 
 #[tokio::test]

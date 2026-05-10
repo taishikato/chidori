@@ -179,9 +179,20 @@ fn h1_title_for_selector(doc: &ParsedDocument, raw_selector: &str) -> Option<Str
 }
 
 fn is_placeholder_title(title: &str) -> bool {
+    let normalized = title
+        .trim()
+        .trim_matches(|ch| matches!(ch, '.' | '!' | '…'))
+        .to_ascii_lowercase();
     matches!(
-        title.trim().to_ascii_lowercase().as_str(),
-        "" | "untitled" | "home" | "index" | "loading..." | "loading"
+        normalized.as_str(),
+        "" | "untitled"
+            | "home"
+            | "index"
+            | "loading"
+            | "just a moment"
+            | "access denied"
+            | "forbidden"
+            | "please wait"
     )
 }
 
