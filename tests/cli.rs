@@ -2,8 +2,11 @@ use assert_cmd::Command;
 use chidori::fetcher::{BOT_USER_AGENT, DEFAULT_USER_AGENT};
 use predicates::prelude::*;
 use serde_json::Value;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(unix)]
+use std::time::Instant;
 use tempfile::tempdir;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -847,6 +850,7 @@ async fn debug_classifies_spa_shell_extraction_failures() {
 }
 
 #[tokio::test]
+#[cfg(unix)]
 async fn render_auto_uses_external_renderer_after_static_extraction_fails() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -885,6 +889,56 @@ HTML
 }
 
 #[tokio::test]
+#[cfg(unix)]
+async fn render_auto_uses_external_renderer_for_placeholder_spa_shell() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/placeholder-spa"))
+        .and(header("user-agent", DEFAULT_USER_AGENT))
+        .respond_with(html_response(
+            r#"
+            <html>
+              <body>
+                <main><div id="root">Loading...</div></main>
+                <script>hydrate()</script>
+              </body>
+            </html>
+            "#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let dir = tempdir().unwrap();
+    let renderer = dir.path().join("renderer.sh");
+    std::fs::write(
+        &renderer,
+        r#"#!/bin/sh
+cat <<'HTML'
+<html><body><article><h1>Rendered Placeholder Shell</h1><p>The renderer supplied real hydrated content.</p></article></body></html>
+HTML
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&renderer).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&renderer, permissions).unwrap();
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/placeholder-spa", server.uri()))
+        .arg("--render=auto")
+        .env("CHIDORI_RENDER_COMMAND", &renderer)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Rendered Placeholder Shell"))
+        .stdout(predicate::str::contains(
+            "The renderer supplied real hydrated content.",
+        ))
+        .stdout(predicate::str::contains("Loading...").not());
+}
+
+#[tokio::test]
+#[cfg(unix)]
 async fn render_auto_allows_renderer_command_arguments() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -931,6 +985,7 @@ HTML
 }
 
 #[tokio::test]
+#[cfg(unix)]
 async fn render_auto_preserves_literal_renderer_paths_with_spaces() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -973,6 +1028,7 @@ HTML
 }
 
 #[tokio::test]
+#[cfg(unix)]
 async fn render_auto_times_out_external_renderer() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -1020,6 +1076,7 @@ HTML
 }
 
 #[tokio::test]
+#[cfg(unix)]
 async fn render_auto_rejects_renderer_output_over_fetch_limit() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -1062,6 +1119,7 @@ printf '</p></article></body></html>'
 }
 
 #[tokio::test]
+#[cfg(unix)]
 async fn render_auto_times_out_waiting_for_renderer_descendant_stdout() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -1111,6 +1169,61 @@ time.sleep(1)
 }
 
 #[tokio::test]
+#[cfg(unix)]
+async fn render_auto_waits_for_descendant_stdout_after_renderer_parent_exits() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/forking-output-renderer"))
+        .and(header("user-agent", "ChidoriTest/2.0"))
+        .respond_with(html_response(
+            r#"<html><body><div id="root"></div><script>hydrate()</script></body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let dir = tempdir().unwrap();
+    let renderer = dir.path().join("forking-output-renderer.py");
+    std::fs::write(
+        &renderer,
+        r#"#!/usr/bin/env python3
+import os
+import sys
+import time
+
+sys.stdout.write("<html><body><article><h1>Delayed Renderer</h1><p>")
+sys.stdout.flush()
+pid = os.fork()
+if pid:
+    os._exit(0)
+time.sleep(0.2)
+sys.stdout.write("The descendant supplied the rest of the rendered content.</p></article></body></html>")
+sys.stdout.flush()
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&renderer).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&renderer, permissions).unwrap();
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/forking-output-renderer", server.uri()))
+        .arg("--render=auto")
+        .arg("--timeout")
+        .arg("5000")
+        .arg("--user-agent")
+        .arg("ChidoriTest/2.0")
+        .env("CHIDORI_RENDER_COMMAND", &renderer)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Delayed Renderer"))
+        .stdout(predicate::str::contains(
+            "The descendant supplied the rest of the rendered content.",
+        ));
+}
+
+#[tokio::test]
+#[cfg(unix)]
 async fn render_auto_fails_fast_when_renderer_outputs_nothing() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

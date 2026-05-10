@@ -3,10 +3,9 @@ use crate::fetcher::{fetch_url, FetchConfig, BOT_USER_AGENT, DEFAULT_USER_AGENT}
 use clap::{Parser, ValueEnum};
 use std::fmt;
 use std::io::Read;
-#[cfg(unix)]
-use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::{ChildStdout, Command, Stdio};
+use std::sync::mpsc::{self, TryRecvError};
 use std::thread;
 use std::time::{Duration, Instant};
 use url::Url;
@@ -325,15 +324,14 @@ fn render_with_external_command(
     let mut child = command
         .spawn()
         .map_err(|error| ChidoriError::FetchFailed(error.to_string()))?;
-    let mut stdout = child
+    let stdout = child
         .stdout
         .take()
         .ok_or_else(|| ChidoriError::FetchFailed("renderer stdout unavailable".to_string()))?;
-    set_renderer_stdout_nonblocking(&stdout)?;
+    let stdout_reader = read_renderer_stdout_in_background(stdout, max_bytes);
     let started = Instant::now();
     let mut status = None;
-    let mut stdout_done = false;
-    let mut output = Vec::new();
+    let mut output = None;
 
     loop {
         if status.is_none() {
@@ -342,31 +340,33 @@ fn render_with_external_command(
                 .map_err(|error| ChidoriError::FetchFailed(error.to_string()))?;
         }
 
-        if !stdout_done {
-            let renderer_group_gone = status.is_some() && !renderer_process_group_alive(child.id());
-            match read_available_renderer_stdout(
-                &mut stdout,
-                &mut output,
-                max_bytes,
-                renderer_group_gone,
-            ) {
-                Ok(RendererStdoutState::Eof) => stdout_done = true,
-                Ok(RendererStdoutState::Drained)
-                    if status
-                        .as_ref()
-                        .is_some_and(|status| !status.success() || !output.is_empty()) =>
-                {
-                    stdout_done = true;
-                }
-                Ok(RendererStdoutState::Drained | RendererStdoutState::Read) => {}
-                Err(error) => {
+        if output.is_none() {
+            match stdout_reader.try_recv() {
+                Ok(Ok(bytes)) => output = Some(bytes),
+                Ok(Err(error)) => {
                     terminate_renderer(&mut child);
                     return Err(error);
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {
+                    terminate_renderer(&mut child);
+                    return Err(ChidoriError::FetchFailed(
+                        "renderer stdout reader stopped".to_string(),
+                    ));
                 }
             }
         }
 
-        if status.is_some() && stdout_done {
+        if status.as_ref().is_some_and(|status| !status.success()) {
+            let status = status.expect("renderer status checked before loop exits");
+            terminate_renderer(&mut child);
+            return Err(ChidoriError::FetchFailed(format!(
+                "renderer exited with status {}",
+                status
+            )));
+        }
+
+        if status.is_some() && output.is_some() {
             break;
         }
 
@@ -380,129 +380,37 @@ fn render_with_external_command(
     }
 
     let status = status.expect("renderer status checked before loop exits");
-
-    if !status.success() {
-        return Err(ChidoriError::FetchFailed(format!(
-            "renderer exited with status {}",
-            status
-        )));
-    }
+    debug_assert!(status.success());
+    let output = output.expect("renderer output checked before loop exits");
 
     String::from_utf8(output)
         .map_err(|error| ChidoriError::FetchFailed(format!("renderer returned non-UTF-8: {error}")))
 }
 
-fn set_renderer_stdout_nonblocking(stdout: &ChildStdout) -> Result<(), ChidoriError> {
-    #[cfg(unix)]
-    unsafe {
-        let flags = libc::fcntl(stdout.as_raw_fd(), libc::F_GETFL);
-        if flags == -1 {
-            return Err(ChidoriError::FetchFailed(
-                std::io::Error::last_os_error().to_string(),
-            ));
-        }
-        if libc::fcntl(stdout.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) == -1 {
-            return Err(ChidoriError::FetchFailed(
-                std::io::Error::last_os_error().to_string(),
-            ));
-        }
-    }
-    Ok(())
-}
-
-enum RendererStdoutState {
-    Read,
-    Drained,
-    Eof,
-}
-
-fn read_available_renderer_stdout(
-    stdout: &mut ChildStdout,
-    output: &mut Vec<u8>,
+fn read_renderer_stdout_in_background(
+    mut stdout: ChildStdout,
     max_bytes: u64,
-    renderer_group_gone: bool,
-) -> Result<RendererStdoutState, ChidoriError> {
-    let mut buffer = [0_u8; 8192];
-    let mut read_any = false;
-
-    loop {
-        let events = renderer_stdout_events(stdout)?;
-        if events == 0 {
-            if renderer_group_gone {
-                return Ok(RendererStdoutState::Eof);
-            }
-            return Ok(if read_any {
-                RendererStdoutState::Read
-            } else {
-                RendererStdoutState::Drained
-            });
-        }
-        #[cfg(unix)]
-        if (events & libc::POLLIN) == 0 && (events & (libc::POLLHUP | libc::POLLERR)) != 0 {
-            return Ok(if renderer_group_gone {
-                RendererStdoutState::Eof
-            } else {
-                RendererStdoutState::Drained
-            });
-        }
-
-        match stdout.read(&mut buffer) {
-            Ok(0) => return Ok(RendererStdoutState::Eof),
-            Ok(bytes_read) => {
-                read_any = true;
-                let actual = output.len() as u64 + bytes_read as u64;
-                if actual > max_bytes {
-                    return Err(ChidoriError::TooLarge(actual, max_bytes));
+) -> mpsc::Receiver<Result<Vec<u8>, ChidoriError>> {
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let mut output = Vec::new();
+        let mut buffer = [0_u8; 8192];
+        let result = loop {
+            match stdout.read(&mut buffer) {
+                Ok(0) => break Ok(output),
+                Ok(bytes_read) => {
+                    let actual = output.len() as u64 + bytes_read as u64;
+                    if actual > max_bytes {
+                        break Err(ChidoriError::TooLarge(actual, max_bytes));
+                    }
+                    output.extend_from_slice(&buffer[..bytes_read]);
                 }
-                output.extend_from_slice(&buffer[..bytes_read]);
+                Err(error) => break Err(ChidoriError::FetchFailed(error.to_string())),
             }
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                return Ok(RendererStdoutState::Drained);
-            }
-            Err(error) => return Err(ChidoriError::FetchFailed(error.to_string())),
-        }
-    }
-}
-
-fn renderer_process_group_alive(child_id: u32) -> bool {
-    #[cfg(unix)]
-    unsafe {
-        let process_group_id = child_id as libc::pid_t;
-        if libc::kill(-process_group_id, 0) == 0 {
-            return true;
-        }
-
-        std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-    }
-
-    #[cfg(not(unix))]
-    {
-        let _ = child_id;
-        false
-    }
-}
-
-fn renderer_stdout_events(stdout: &ChildStdout) -> Result<i16, ChidoriError> {
-    #[cfg(unix)]
-    unsafe {
-        let mut poll_fd = libc::pollfd {
-            fd: stdout.as_raw_fd(),
-            events: libc::POLLIN | libc::POLLHUP,
-            revents: 0,
         };
-        let result = libc::poll(&mut poll_fd, 1, 0);
-        if result == -1 {
-            return Err(ChidoriError::FetchFailed(
-                std::io::Error::last_os_error().to_string(),
-            ));
-        }
-        Ok(if result > 0 { poll_fd.revents } else { 0 })
-    }
-
-    #[cfg(not(unix))]
-    {
-        Ok(1)
-    }
+        let _ = sender.send(result);
+    });
+    receiver
 }
 
 fn terminate_renderer(child: &mut std::process::Child) {
@@ -703,7 +611,7 @@ fn extract_markdown_from_doc(
             )
         };
 
-    if markdown.trim().is_empty() {
+    if markdown.trim().is_empty() || is_low_information_spa_shell(doc, &markdown) {
         Err(ChidoriError::ExtractionFailed)
     } else {
         Ok(ExtractionResult {
@@ -725,4 +633,23 @@ fn first_markdown_heading(markdown: &str) -> Option<String> {
             .filter(|title| !title.is_empty())
             .map(ToString::to_string)
     })
+}
+
+fn is_low_information_spa_shell(doc: &crate::document::ParsedDocument, markdown: &str) -> bool {
+    if markdown.split_whitespace().count() >= 10 {
+        return false;
+    }
+
+    let html = doc.html.to_ascii_lowercase();
+    html.contains("<script")
+        && [
+            "id=\"root\"",
+            "id=\"app\"",
+            "id=\"__next\"",
+            "id=\"svelte\"",
+            "class=\"app\"",
+            "data-reactroot",
+        ]
+        .iter()
+        .any(|marker| html.contains(marker))
 }

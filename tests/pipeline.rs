@@ -1,5 +1,5 @@
 use chidori::{
-    cleaner::{clean_html, CleanOptions},
+    cleaner::{clean_html, clean_html_with_report, CleanOptions},
     document::ParsedDocument,
     extractor::{extract_main_content, extract_main_html},
     markdown::{extract_raw_markdown, html_to_markdown, remove_markdown_images, MarkdownOptions},
@@ -810,6 +810,26 @@ fn removes_noise_and_optionally_images() {
     assert!(!cleaned.contains("Related links"));
     assert!(!cleaned.contains("<img"));
     assert!(!cleaned.contains("Share"));
+}
+
+#[test]
+fn cleanup_report_counts_multiple_removed_elements() {
+    let html = r#"
+    <article>
+      <nav>Top navigation</nav>
+      <p>Keep this paragraph.</p>
+      <nav>Bottom navigation</nav>
+    </article>"#;
+
+    let cleaned = clean_html_with_report(html, &CleanOptions { no_images: false });
+    let nav_removal = cleaned
+        .removals
+        .iter()
+        .find(|removal| removal.reason == "noise-tag" && removal.selector == "nav")
+        .unwrap();
+
+    assert_eq!(nav_removal.count, 2);
+    assert!(!cleaned.html.contains("navigation"));
 }
 
 #[test]

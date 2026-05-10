@@ -101,8 +101,21 @@ fn push_removal_if_changed(
         step: "clean-html".to_string(),
         reason: reason.to_string(),
         selector: selector.to_string(),
-        count: 1,
+        count: removed_element_count(before, after, selector).max(1),
     });
+}
+
+fn removed_element_count(before: &str, after: &str, selector: &str) -> usize {
+    let Ok(selector) = Selector::parse(selector) else {
+        return 0;
+    };
+    let before = Html::parse_fragment(before);
+    let after = Html::parse_fragment(after);
+
+    before
+        .select(&selector)
+        .count()
+        .saturating_sub(after.select(&selector).count())
 }
 
 fn remove_hidden_elements(html: &str) -> String {

@@ -25,7 +25,19 @@ chidori https://example.com --output article.md
 chidori https://example.com --max-chars 20000
 chidori https://example.com --lang ja
 chidori https://example.com --no-images
+chidori https://example.com --debug
+CHIDORI_RENDER_COMMAND=/path/to/render-page chidori https://example.com --render=auto
 ```
+
+`--json` prints metadata plus `markdown` as JSON. Metadata includes `url`,
+`finalUrl`, `canonicalUrl`, `domain`, title/description fields, `metaTags`,
+`schemaOrgData`, and `wordCount`. With `--json --debug`, stdout also includes a
+`debug` object; human-readable debug lines still go to stderr.
+
+`--render=auto` is an optional fallback for JavaScript-heavy pages. When static
+extraction fails or only finds a short app shell, `chidori` runs
+`CHIDORI_RENDER_COMMAND <url>` and expects rendered HTML on stdout. Renderer
+output uses the same timeout and 5 MiB fetch limit.
 
 ## Why
 
