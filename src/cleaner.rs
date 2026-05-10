@@ -218,6 +218,11 @@ fn strip_dangerous_attributes(html: &str) -> String {
     while let Some(index) = rest.find('<') {
         output.push_str(&rest[..index]);
         let candidate = &rest[index..];
+        if !candidate.chars().nth(1).is_some_and(is_tag_start_character) {
+            output.push('<');
+            rest = &candidate[1..];
+            continue;
+        }
         let Some(end) = opening_tag_end(candidate) else {
             output.push_str(candidate);
             return output;
@@ -233,6 +238,10 @@ fn strip_dangerous_attributes(html: &str) -> String {
 
     output.push_str(rest);
     output
+}
+
+fn is_tag_start_character(character: char) -> bool {
+    character.is_ascii_alphabetic() || matches!(character, '/' | '!' | '?')
 }
 
 fn opening_tag_end(input: &str) -> Option<usize> {

@@ -1272,6 +1272,17 @@ fn cleaner_treats_non_ascii_less_than_text_as_text() {
 }
 
 #[test]
+fn cleaner_preserves_ascii_less_than_comparison_text() {
+    let html = "<article><p>Keep comparisons like value < 2 > 1 intact.</p></article>";
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
+
+    assert!(cleaned.contains("value < 2 > 1"));
+    assert!(markdown.contains(r"value \< 2 \> 1"), "{markdown}");
+}
+
+#[test]
 fn keeps_images_when_allowed() {
     let html = r#"
     <article>
