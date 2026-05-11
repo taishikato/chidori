@@ -93,6 +93,128 @@ fn extracts_canonical_meta_tags_and_richer_article_metadata() {
 }
 
 #[test]
+fn extracts_author_and_published_from_dom_byline_near_heading() {
+    let html =
+        std::fs::read_to_string("tests/fixtures/reference/metadata--dom-author-date.html").unwrap();
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/story").unwrap());
+
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.title, "Metadata Heuristics");
+    assert_eq!(metadata.author, "Ada Lovelace");
+    assert_eq!(metadata.published, "2026-05-10T09:30:00Z");
+}
+
+#[test]
+fn placeholder_social_title_yields_to_extracted_content_title() {
+    let html = r#"<!doctype html>
+    <html>
+      <head>
+        <title>Just a moment</title>
+        <meta property="og:title" content="Untitled">
+      </head>
+      <body>
+        <article>
+          <h1>Semantic Article Title</h1>
+          <p>Hello world.</p>
+        </article>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata_with_content_title(&doc, Some("Extracted Article Title"));
+
+    assert_eq!(metadata.title, "Extracted Article Title");
+}
+
+#[test]
+fn dom_author_prefers_article_candidate_over_earlier_boilerplate() {
+    let html = r#"<!doctype html>
+    <html>
+      <body>
+        <aside class="related">
+          <p class="byline">By Related Story</p>
+          <a rel="author" href="/authors/site">Site Staff</a>
+        </aside>
+        <main>
+          <article>
+            <h1>Article Title</h1>
+            <p class="byline">By <a rel="author" href="/authors/ada">Ada Lovelace</a></p>
+            <p>Hello world.</p>
+          </article>
+        </main>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.author, "Ada Lovelace");
+}
+
+#[test]
+fn dom_author_prefers_article_text_byline_over_earlier_global_rel_author() {
+    let html = r#"<!doctype html>
+    <html>
+      <body>
+        <aside class="related">
+          <a rel="author" href="/authors/site">Site Staff</a>
+        </aside>
+        <main>
+          <article>
+            <h1>Article Title</h1>
+            <p class="byline">By Ada Lovelace</p>
+            <p>Hello world.</p>
+          </article>
+        </main>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.author, "Ada Lovelace");
+}
+
+#[test]
+fn dom_byline_strips_trailing_published_and_follow_text() {
+    let html = r#"<!doctype html>
+    <html>
+      <body>
+        <article>
+          <h1>Article Title</h1>
+          <p class="byline">By Ada Lovelace Published May 10, 2026 Follow</p>
+          <p>Hello world.</p>
+        </article>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.author, "Ada Lovelace");
+}
+
+#[test]
+fn dom_published_prefers_article_dateline_over_earlier_time() {
+    let html = r#"<!doctype html>
+    <html>
+      <body>
+        <header>
+          <time datetime="2026-01-01T00:00:00Z">Updated navigation</time>
+        </header>
+        <main>
+          <article>
+            <h1>Article Title</h1>
+            <p class="dateline"><time datetime="2026-05-10T09:30:00Z">May 10, 2026</time></p>
+            <p>Hello world.</p>
+          </article>
+        </main>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.published, "2026-05-10T09:30:00Z");
+}
+
+#[test]
 fn chrome_blocker_titles_yield_to_extracted_content_title() {
     let html = r#"<!doctype html>
     <html>

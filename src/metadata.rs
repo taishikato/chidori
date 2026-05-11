@@ -1,5 +1,5 @@
 use crate::document::ParsedDocument;
-use scraper::Selector;
+use scraper::{ElementRef, Selector};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -48,16 +48,17 @@ pub fn extract_metadata_with_content_title(
     let content_title = content_title
         .map(|title| title.trim().to_string())
         .filter(|title| !title.is_empty() && !is_placeholder_title(title));
-    let title = meta(doc, "property", "og:title")
-        .or_else(|| meta(doc, "name", "twitter:title"))
-        .or_else(|| schema_string(&schema_org_data, &["headline"]))
-        .or_else(|| schema_article_string(&schema_org_data, "name"))
-        .or_else(|| title(doc).map(|title| clean_title(&title, &site)))
-        .filter(|title| !is_placeholder_title(title))
-        .or(content_title)
-        .or_else(|| semantic_h1_title(doc))
-        .or_else(|| h1_title(doc))
-        .unwrap_or_default();
+    let title = valid_title_candidate(
+        meta(doc, "property", "og:title")
+            .or_else(|| meta(doc, "name", "twitter:title"))
+            .or_else(|| schema_string(&schema_org_data, &["headline"]))
+            .or_else(|| schema_article_string(&schema_org_data, "name")),
+    )
+    .or(content_title)
+    .or_else(|| valid_title_candidate(semantic_h1_title(doc)))
+    .or_else(|| valid_title_candidate(title(doc).map(|title| clean_title(&title, &site))))
+    .or_else(|| h1_title(doc))
+    .unwrap_or_default();
 
     Metadata {
         url: doc.url.to_string(),
@@ -82,11 +83,14 @@ pub fn extract_metadata_with_content_title(
             .or_else(|| schema_string(&schema_org_data, &["author.name", "creator.name"]))
             .or_else(|| schema_article_string(&schema_org_data, "author"))
             .or_else(|| schema_article_string(&schema_org_data, "creator"))
+            .or_else(|| scoped_author(doc))
+            .or_else(|| global_author(doc))
             .unwrap_or_default(),
         published: meta(doc, "property", "article:published_time")
             .or_else(|| meta(doc, "name", "date"))
             .or_else(|| meta(doc, "name", "datePublished"))
             .or_else(|| meta(doc, "name", "citation_publication_date"))
+            .or_else(|| published_near_h1(doc))
             .or_else(|| time_datetime(doc))
             .or_else(|| schema_string(&schema_org_data, &["datePublished", "dateCreated"]))
             .unwrap_or_default(),
@@ -196,6 +200,10 @@ fn is_placeholder_title(title: &str) -> bool {
     )
 }
 
+fn valid_title_candidate(title: Option<String>) -> Option<String> {
+    title.filter(|title| !is_placeholder_title(title))
+}
+
 fn clean_title(title: &str, site: &str) -> String {
     let title = title.trim();
     let site = site.trim();
@@ -234,6 +242,161 @@ fn time_datetime(doc: &ParsedDocument) -> Option<String> {
         .and_then(|node| node.value().attr("datetime"))
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+fn published_near_h1(doc: &ParsedDocument) -> Option<String> {
+    published_datetime_for_selector(
+        doc,
+        r#"article .date time[datetime], article .dateline time[datetime], article .published time[datetime], article [class*="date"] time[datetime]"#,
+    )
+    .or_else(|| {
+        published_datetime_for_selector(
+            doc,
+            r#"main .date time[datetime], main .dateline time[datetime], main .published time[datetime], main [class*="date"] time[datetime]"#,
+        )
+    })
+    .or_else(|| {
+        published_datetime_for_selector(
+            doc,
+            r#".date time[datetime], .dateline time[datetime], .published time[datetime], [class*="date"] time[datetime]"#,
+        )
+    })
+}
+
+fn published_datetime_for_selector(doc: &ParsedDocument, raw_selector: &str) -> Option<String> {
+    let selector = Selector::parse(raw_selector).unwrap();
+    doc.dom
+        .select(&selector)
+        .next()
+        .and_then(|node| node.value().attr("datetime"))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn scoped_author(doc: &ParsedDocument) -> Option<String> {
+    scoped_article_author(doc).or_else(|| scoped_main_author(doc))
+}
+
+fn scoped_article_author(doc: &ParsedDocument) -> Option<String> {
+    rel_author_for_selector(
+        doc,
+        r#"article a[rel~="author"], article address[rel~="author"]"#,
+    )
+    .or_else(|| {
+        byline_author_for_selector(
+            doc,
+            r#"article .byline, article [class*="byline"], article [itemprop="author"]"#,
+        )
+    })
+}
+
+fn scoped_main_author(doc: &ParsedDocument) -> Option<String> {
+    rel_author_for_selector(doc, r#"main a[rel~="author"], main address[rel~="author"]"#).or_else(
+        || {
+            byline_author_for_selector(
+                doc,
+                r#"main .byline, main [class*="byline"], main [itemprop="author"]"#,
+            )
+        },
+    )
+}
+
+fn global_author(doc: &ParsedDocument) -> Option<String> {
+    rel_author_for_selector(doc, r#"a[rel~="author"], address[rel~="author"]"#).or_else(|| {
+        byline_author_for_selector(doc, r#".byline, [class*="byline"], [itemprop="author"]"#)
+    })
+}
+
+fn rel_author_for_selector(doc: &ParsedDocument, raw_selector: &str) -> Option<String> {
+    let selector = Selector::parse(raw_selector).unwrap();
+    unique_short_values(
+        doc.dom
+            .select(&selector)
+            .filter_map(|node| {
+                let text = node.text().collect::<Vec<_>>().join(" ");
+                clean_author_candidate(&text)
+            })
+            .collect::<Vec<_>>(),
+    )
+    .first()
+    .cloned()
+}
+
+fn byline_author_for_selector(doc: &ParsedDocument, raw_selector: &str) -> Option<String> {
+    let selector = Selector::parse(raw_selector).unwrap();
+    doc.dom.select(&selector).find_map(byline_author_from_node)
+}
+
+fn byline_author_from_node(node: ElementRef<'_>) -> Option<String> {
+    let author_selector = Selector::parse(r#"a[rel~="author"], [itemprop="name"]"#).unwrap();
+    node.select(&author_selector)
+        .find_map(|author| {
+            let text = author.text().collect::<Vec<_>>().join(" ");
+            clean_author_candidate(&text)
+        })
+        .or_else(|| {
+            let text = node.text().collect::<Vec<_>>().join(" ");
+            let text = strip_byline_prefix(&text);
+            clean_author_candidate(trim_trailing_byline_noise(text))
+        })
+}
+
+fn strip_byline_prefix(value: &str) -> &str {
+    let value = value.trim();
+    value
+        .strip_prefix("By ")
+        .or_else(|| value.strip_prefix("by "))
+        .or_else(|| value.strip_prefix("BY "))
+        .or_else(|| value.strip_prefix("By:"))
+        .map(str::trim)
+        .unwrap_or(value)
+}
+
+fn trim_trailing_byline_noise(value: &str) -> &str {
+    let lower = value.to_ascii_lowercase();
+    let mut end = value.len();
+    for marker in [
+        " published ",
+        " updated ",
+        " posted ",
+        " follow",
+        " subscribe",
+    ] {
+        if let Some(index) = lower.find(marker) {
+            end = end.min(index);
+        }
+    }
+    value[..end].trim()
+}
+
+fn clean_author_candidate(value: &str) -> Option<String> {
+    let cleaned = value
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .trim_matches(|ch| matches!(ch, ',' | '|' | '-' | '–' | '—'))
+        .to_string();
+    let lower = cleaned.to_ascii_lowercase();
+    if cleaned.is_empty()
+        || cleaned.len() > 100
+        || matches!(lower.as_str(), "author" | "authors" | "by")
+        || is_placeholder_title(&cleaned)
+    {
+        None
+    } else {
+        Some(cleaned)
+    }
+}
+
+fn unique_short_values(values: Vec<String>) -> Vec<String> {
+    let mut unique = Vec::new();
+    for value in values {
+        if !unique.iter().any(|existing| existing == &value) {
+            unique.push(value);
+        }
+    }
+    unique
 }
 
 fn collect_meta_tags(doc: &ParsedDocument) -> Vec<MetaTag> {
