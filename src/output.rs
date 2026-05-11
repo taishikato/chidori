@@ -18,6 +18,8 @@ pub struct DebugDiagnostics {
     pub content_selector: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_score: Option<isize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_class: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub removals: Vec<crate::cleaner::RemovalRecord>,
     pub timings: DebugTimings,

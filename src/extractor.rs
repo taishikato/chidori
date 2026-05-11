@@ -31,6 +31,7 @@ const PRIMARY_ENTRY_SELECTORS: &[&str] = &[
 ];
 
 const BODY_FALLBACK_SELECTORS: &[&str] = &["body"];
+const BROAD_RETRY_SELECTORS: &[&str] = &["main", "[role=\"main\"]", "article", "body"];
 const LOW_WORD_COUNT_RETRY_THRESHOLD: usize = 50;
 const RETRY_MIN_GAIN_MULTIPLIER: usize = 2;
 const ARTICLE_RETRY_PROTECTION_MIN_WORDS: usize = 10;
@@ -86,6 +87,12 @@ struct MicroblogSelectors {
     bodies: Selector,
 }
 
+#[derive(Clone, Copy)]
+enum SocialThreadSite {
+    Bluesky,
+    Threads,
+}
+
 fn selector_priority(selector_count: usize, selector_index: usize) -> isize {
     ((selector_count - selector_index) * 40) as isize
 }
@@ -126,6 +133,15 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
         return Ok(ExtractedContent {
             html,
             selector: Some("repository-discussion".to_string()),
+            score: None,
+            fallbacks: Vec::new(),
+        });
+    }
+
+    if let Some(html) = ai_conversation_candidate(doc)? {
+        return Ok(ExtractedContent {
+            html,
+            selector: Some("ai-conversation".to_string()),
             score: None,
             fallbacks: Vec::new(),
         });
@@ -216,13 +232,28 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
         if let Some(candidate) = best_candidate
             .as_ref()
             .filter(|candidate| candidate.word_count < LOW_WORD_COUNT_RETRY_THRESHOLD)
+            .cloned()
         {
-            if let Some(body_candidate) =
+            let broad_retry_candidate =
+                best_candidate_for_selectors(doc, BROAD_RETRY_SELECTORS, &selectors, false)?
+                    .filter(|broad_candidate| should_retry_with_body(&candidate, broad_candidate));
+            let body_retry_candidate =
                 best_candidate_for_selectors(doc, BODY_FALLBACK_SELECTORS, &selectors, false)?
-            {
-                if should_retry_with_body(candidate, &body_candidate) {
-                    best_candidate = Some(body_candidate);
+                    .filter(|body_candidate| should_retry_with_body(&candidate, body_candidate));
+
+            let retry_candidate = match (broad_retry_candidate, body_retry_candidate) {
+                (Some(broad_candidate), Some(body_candidate))
+                    if should_retry_with_body(&broad_candidate, &body_candidate) =>
+                {
+                    Some(body_candidate)
                 }
+                (Some(broad_candidate), _) => Some(broad_candidate),
+                (None, body_candidate) => body_candidate,
+            };
+
+            if let Some(retry_candidate) = retry_candidate {
+                fallback_steps.push("low-word-selector-retry".to_string());
+                best_candidate = Some(retry_candidate);
             }
         }
     }
@@ -261,6 +292,17 @@ fn known_site_content_candidate(
         "article, .body.markup, .available-content"
     } else if host_matches(host, "discourse.org") || host_matches(host, "discourse.group") {
         ".topic-post .cooked, #post_1 .cooked, article .cooked"
+    } else if host_matches(host, "leetcode.com") {
+        r#"[data-track-load="description_content"]"#
+    } else if host_matches(host, "lwn.net") {
+        ".ArticleText"
+    } else if host_matches(host, "bsky.app")
+        || host_matches(host, "threads.net")
+        || host_matches(host, "threads.com")
+    {
+        r#"main"#
+    } else if host_matches(host, "linkedin.com") {
+        r#"main article, article"#
     } else {
         return Ok(None);
     };
@@ -274,8 +316,13 @@ fn known_site_content_candidate(
     else {
         return Ok(None);
     };
+    if let Some(site) = social_thread_site(doc, host) {
+        if let Some(html) = social_thread_candidate(content, site, doc.url.path())? {
+            return Ok(Some((content_selector.to_string(), html)));
+        }
+    }
 
-    let title_selector = Selector::parse("h1, #firstHeading")
+    let title_selector = Selector::parse("h1, #firstHeading, .PageHeadline")
         .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
     let title = doc
         .dom
@@ -295,8 +342,345 @@ fn known_site_content_candidate(
     Ok(Some((content_selector.to_string(), output)))
 }
 
+fn social_thread_site(doc: &ParsedDocument, host: &str) -> Option<SocialThreadSite> {
+    let segments: Vec<_> = doc.url.path_segments()?.collect();
+
+    if host_matches(host, "bsky.app") {
+        (segments.len() >= 4
+            && segments[0] == "profile"
+            && !segments[1].is_empty()
+            && segments[2] == "post"
+            && !segments[3].is_empty())
+        .then_some(SocialThreadSite::Bluesky)
+    } else if host_matches(host, "threads.net") || host_matches(host, "threads.com") {
+        (segments.len() >= 3
+            && segments[0].starts_with('@')
+            && segments[0].len() > 1
+            && segments[1] == "post"
+            && !segments[2].is_empty())
+        .then_some(SocialThreadSite::Threads)
+    } else {
+        None
+    }
+}
+
+fn social_thread_candidate(
+    root: ElementRef<'_>,
+    site: SocialThreadSite,
+    target_path: &str,
+) -> Result<Option<String>, ChidoriError> {
+    let article_selector =
+        Selector::parse("article").map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let author_selector = Selector::parse(r#"a[href^="/profile/"], a[href^="/@"]"#)
+        .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let handle_selector =
+        Selector::parse("span").map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let time_selector =
+        Selector::parse("time").map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let bluesky_body_selector = Selector::parse(r#"[data-testid="postText"]"#)
+        .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let threads_body_selector =
+        Selector::parse("div").map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let threads_chrome_selector = Selector::parse(r#"time, button, header, footer, nav"#)
+        .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let threads_profile_link_selector = Selector::parse(r#"a[href^="/@"]"#)
+        .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let permalink_selector =
+        Selector::parse(r#"a[href]"#).map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+
+    let mut output = String::from("<article class=\"chidori-social-thread\">");
+    let mut post_count = 0;
+    let articles = root
+        .select(&article_selector)
+        .filter(|article| nearest_social_article_parent(*article, &article_selector).is_none())
+        .collect::<Vec<_>>();
+    let start_index = articles.iter().position(|article| {
+        article_matches_target_permalink(*article, &permalink_selector, target_path)
+    });
+
+    for article in articles
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, article)| {
+            if let Some(start_index) = start_index {
+                (index >= start_index
+                    && !article_has_other_post_permalink(
+                        article,
+                        site,
+                        &permalink_selector,
+                        target_path,
+                    ))
+                .then_some(article)
+            } else {
+                Some(article)
+            }
+        })
+    {
+        let Some(body) = social_thread_body(
+            article,
+            site,
+            &article_selector,
+            &bluesky_body_selector,
+            &threads_body_selector,
+            &threads_chrome_selector,
+            &threads_profile_link_selector,
+        ) else {
+            continue;
+        };
+
+        if post_count > 0 {
+            output.push_str("<blockquote>");
+        } else {
+            output.push_str("<section class=\"chidori-social-post\">");
+        }
+
+        if let Some(author) = article
+            .descendent_elements()
+            .find(|element| {
+                author_selector.matches(element)
+                    && nearest_social_article(*element, &article_selector) == Some(article)
+            })
+            .map(element_text)
+            .filter(|author| !author.is_empty())
+        {
+            output.push_str("<p>");
+            output.push_str(&encode_text(&author));
+            output.push_str("</p>");
+        }
+
+        let mut meta = Vec::new();
+        if let Some(handle) = article
+            .descendent_elements()
+            .find(|element| {
+                handle_selector.matches(element)
+                    && nearest_social_article(*element, &article_selector) == Some(article)
+            })
+            .map(element_text)
+            .filter(|handle| handle.starts_with('@'))
+        {
+            meta.push(handle);
+        }
+        if let Some(date) = article
+            .descendent_elements()
+            .find(|element| {
+                time_selector.matches(element)
+                    && nearest_social_article(*element, &article_selector) == Some(article)
+            })
+            .map(element_text)
+            .filter(|date| !date.is_empty())
+        {
+            meta.push(date);
+        }
+        push_meta_paragraph(&mut output, &meta);
+        output.push_str(&body.inner_html());
+
+        if post_count > 0 {
+            output.push_str("</blockquote>");
+        } else {
+            output.push_str("</section>");
+        }
+        post_count += 1;
+    }
+    output.push_str("</article>");
+
+    if post_count == 0 {
+        Ok(None)
+    } else {
+        Ok(Some(output))
+    }
+}
+
+fn article_matches_target_permalink(
+    article: ElementRef<'_>,
+    permalink_selector: &Selector,
+    target_path: &str,
+) -> bool {
+    article.select(permalink_selector).any(|link| {
+        link.value()
+            .attr("href")
+            .is_some_and(|href| href_path_matches_target(href, target_path))
+    })
+}
+
+fn article_has_other_post_permalink(
+    article: ElementRef<'_>,
+    site: SocialThreadSite,
+    permalink_selector: &Selector,
+    target_path: &str,
+) -> bool {
+    article.select(permalink_selector).any(|link| {
+        link.value().attr("href").is_some_and(|href| {
+            href_looks_like_social_post(href, site) && !href_path_matches_target(href, target_path)
+        })
+    })
+}
+
+fn href_path_matches_target(href: &str, target_path: &str) -> bool {
+    normalize_href_path(href) == target_path.trim_end_matches('/')
+}
+
+fn href_looks_like_social_post(href: &str, site: SocialThreadSite) -> bool {
+    let path = normalize_href_path(href);
+    match site {
+        SocialThreadSite::Bluesky => path.contains("/profile/") && path.contains("/post/"),
+        SocialThreadSite::Threads => path.starts_with("/@") && path.contains("/post/"),
+    }
+}
+
+fn normalize_href_path(href: &str) -> String {
+    if let Ok(url) = url::Url::parse(href) {
+        return url.path().trim_end_matches('/').to_string();
+    }
+    href.split(['?', '#'])
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches('/')
+        .to_string()
+}
+
+fn social_thread_body<'a>(
+    article: ElementRef<'a>,
+    site: SocialThreadSite,
+    article_selector: &Selector,
+    bluesky_body_selector: &Selector,
+    threads_body_selector: &Selector,
+    threads_chrome_selector: &Selector,
+    threads_profile_link_selector: &Selector,
+) -> Option<ElementRef<'a>> {
+    match site {
+        SocialThreadSite::Bluesky => article.descendent_elements().find(|element| {
+            bluesky_body_selector.matches(element)
+                && nearest_social_article(*element, article_selector) == Some(article)
+                && !element_text(*element).is_empty()
+        }),
+        SocialThreadSite::Threads => article.descendent_elements().find(|element| {
+            threads_body_selector.matches(element)
+                && nearest_social_article(*element, article_selector) == Some(article)
+                && !element_text(*element).is_empty()
+                && element.select(threads_chrome_selector).next().is_none()
+                && !is_threads_profile_only_block(*element, threads_profile_link_selector)
+                && !has_threads_profile_only_child(
+                    *element,
+                    threads_body_selector,
+                    threads_profile_link_selector,
+                )
+        }),
+    }
+}
+
+fn has_threads_profile_only_child(
+    element: ElementRef<'_>,
+    body_selector: &Selector,
+    profile_link_selector: &Selector,
+) -> bool {
+    element
+        .select(body_selector)
+        .any(|child| is_threads_profile_only_block(child, profile_link_selector))
+}
+
+fn is_threads_profile_only_block(
+    element: ElementRef<'_>,
+    profile_link_selector: &Selector,
+) -> bool {
+    let text = element_text(element);
+    let profile_text = normalize_text(
+        &element
+            .select(profile_link_selector)
+            .map(element_text)
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join(" "),
+    );
+
+    !profile_text.is_empty() && text == profile_text
+}
+
+fn nearest_social_article<'a>(
+    element: ElementRef<'a>,
+    article_selector: &Selector,
+) -> Option<ElementRef<'a>> {
+    element.ancestors().find_map(|ancestor| {
+        ElementRef::wrap(ancestor).filter(|ancestor| article_selector.matches(ancestor))
+    })
+}
+
+fn nearest_social_article_parent<'a>(
+    article: ElementRef<'a>,
+    article_selector: &Selector,
+) -> Option<ElementRef<'a>> {
+    article.ancestors().skip(1).find_map(|ancestor| {
+        ElementRef::wrap(ancestor).filter(|ancestor| article_selector.matches(ancestor))
+    })
+}
+
 fn host_matches(host: &str, domain: &str) -> bool {
     host == domain || host.ends_with(&format!(".{domain}"))
+}
+
+fn ai_conversation_candidate(doc: &ParsedDocument) -> Result<Option<String>, ChidoriError> {
+    let Some(host) = doc.url.host_str() else {
+        return Ok(None);
+    };
+    let is_supported = host_matches(host, "chatgpt.com")
+        || host_matches(host, "claude.ai")
+        || host_matches(host, "grok.com")
+        || host_matches(host, "gemini.google.com");
+    if !is_supported {
+        return Ok(None);
+    }
+
+    let turn_selector =
+        Selector::parse(r#"[data-testid="conversation-turn"], [data-message-author-role]"#)
+            .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let role_selector = Selector::parse(r#"[data-message-author-role]"#)
+        .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+
+    let mut output = String::from("<article class=\"chidori-ai-conversation\">");
+    let mut count = 0;
+    for turn in doc.dom.select(&turn_selector) {
+        if nearest_conversation_parent(turn, &turn_selector).is_some() {
+            continue;
+        }
+
+        let role_element = if turn.value().attr("data-message-author-role").is_some() {
+            Some(turn)
+        } else {
+            turn.select(&role_selector).next()
+        };
+        let role = role_element
+            .and_then(|element| element.value().attr("data-message-author-role"))
+            .unwrap_or("message");
+        let body = role_element
+            .map(|element| element.inner_html())
+            .unwrap_or_else(|| turn.inner_html());
+        if text_word_count(&body) == 0 {
+            continue;
+        }
+
+        output.push_str("<section>");
+        output.push_str("<p><strong>");
+        output.push_str(&encode_text(role));
+        output.push_str("</strong></p>");
+        output.push_str(&body);
+        output.push_str("</section>");
+        count += 1;
+    }
+    output.push_str("</article>");
+
+    if count >= 2 {
+        Ok(Some(output))
+    } else {
+        Ok(None)
+    }
+}
+
+fn nearest_conversation_parent<'a>(
+    element: ElementRef<'a>,
+    selector: &Selector,
+) -> Option<ElementRef<'a>> {
+    element.ancestors().skip(1).find_map(|ancestor| {
+        ElementRef::wrap(ancestor).filter(|ancestor| selector.matches(ancestor))
+    })
 }
 
 fn repository_discussion_candidate(doc: &ParsedDocument) -> Result<Option<String>, ChidoriError> {

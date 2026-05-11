@@ -17,6 +17,112 @@ fn fixture_to_markdown(name: &str) -> String {
 }
 
 #[test]
+fn converts_simple_html_tables_to_markdown_tables() {
+    let html =
+        std::fs::read_to_string("tests/fixtures/reference/markdown--simple-table.html").unwrap();
+    let markdown = html_to_markdown(&html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("| Name | Score |"));
+    assert!(markdown.contains("| --- | --- |"));
+    assert!(markdown.contains("| Alpha | 10 |"));
+    assert!(markdown.contains("| Beta | 20 |"));
+}
+
+#[test]
+fn preserves_inline_links_inside_simple_html_table_cells() {
+    let html = r#"
+    <article>
+      <table>
+        <thead>
+          <tr><th>Name</th><th>Spec</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Alpha</td><td><a href="https://example.com/a">Spec A</a></td></tr>
+        </tbody>
+      </table>
+    </article>"#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(
+        markdown.contains("| Alpha | [Spec A](https://example.com/a) |"),
+        "{markdown}"
+    );
+}
+
+#[test]
+fn restores_specialized_elements_inside_markdown_table_cells() {
+    let html = r#"<!doctype html>
+    <html>
+      <body>
+        <article>
+          <table>
+            <thead>
+              <tr><th>Formula</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><math data-latex="x|y"></math></td></tr>
+            </tbody>
+          </table>
+        </article>
+      </body>
+    </html>"#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("| Formula |"), "{markdown}");
+    assert!(markdown.contains("| $x\\|y$ |"), "{markdown}");
+    assert!(!markdown.contains("CHIDORISPECIAL"), "{markdown}");
+    assert!(!markdown.contains("CHIDORI_SPECIAL"), "{markdown}");
+}
+
+#[test]
+fn converts_footnote_refs_inside_markdown_table_cells() {
+    let html = r##"
+    <article>
+      <table>
+        <thead>
+          <tr><th>Claim</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Documented claim<sup><a href="#fn-1">1</a></sup></td></tr>
+        </tbody>
+      </table>
+      <section id="footnotes">
+        <ol>
+          <li id="fn-1">Table footnote text. <a href="#fnref-1">↩</a></li>
+        </ol>
+      </section>
+    </article>"##;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("| Documented claim[^1] |"), "{markdown}");
+    assert!(
+        markdown.contains("[^1]: Table footnote text."),
+        "{markdown}"
+    );
+    assert!(!markdown.contains("#fn-1"), "{markdown}");
+}
+
+#[test]
+fn named_footnote_refs_match_named_definitions() {
+    let html = r##"
+    <article>
+      <p>A named note<sup><a href="#fn-note" id="fnref-note">note</a></sup>.</p>
+      <section id="footnotes">
+        <ol>
+          <li id="fn-note">Named footnote text. <a href="#fnref-note">↩</a></li>
+        </ol>
+      </section>
+    </article>"##;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("[^note]."), "{markdown}");
+    assert!(
+        markdown.contains("[^note]: Named footnote text."),
+        "{markdown}"
+    );
+}
+
+#[test]
 fn extracts_basic_metadata() {
     let html = r#"<!doctype html>
     <html lang="en">
@@ -61,6 +167,181 @@ fn cleans_site_suffix_from_html_title_when_site_name_is_known() {
 }
 
 #[test]
+fn html_title_beats_unrelated_article_h1() {
+    let html = r#"<!doctype html>
+    <html>
+      <head><title>Actual Article Title</title></head>
+      <body>
+        <article>
+          <h1>Comments</h1>
+          <p>The readable article text is still here.</p>
+        </article>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.title, "Actual Article Title");
+}
+
+#[test]
+fn html_title_beats_short_article_h1_even_when_it_overlaps() {
+    let html = r#"<!doctype html>
+    <html>
+      <head><title>Actual Article Comments</title></head>
+      <body>
+        <article>
+          <h1>Comments</h1>
+          <p>The readable article text is still here.</p>
+        </article>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.title, "Actual Article Comments");
+}
+
+#[test]
+fn article_h1_beats_site_only_html_title() {
+    let html = r#"<!doctype html>
+    <html>
+      <head><title>Example Site</title></head>
+      <body>
+        <article>
+          <h1>Actual Article Title</h1>
+          <p>The readable article text is still here.</p>
+        </article>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.title, "Actual Article Title");
+}
+
+#[test]
+fn threads_body_allows_profile_mentions_inside_text() {
+    let html = r#"<!doctype html>
+    <html><body>
+      <main>
+        <article>
+          <div>
+            <header>
+              <a href="/@alice">alice</a>
+              <time datetime="2026-05-08T15:04:00Z">May 8</time>
+              <button>Follow</button>
+            </header>
+            <div>Shipping the parser update with <a href="/@bob">@bob</a> today.</div>
+            <footer>Like Reply Share</footer>
+          </div>
+        </article>
+      </main>
+    </body></html>"#;
+    let doc = ParsedDocument::parse(
+        html,
+        Url::parse("https://www.threads.net/@alice/post/abc123").unwrap(),
+    );
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("chidori-social-thread"), "{main}");
+    assert!(main.contains("@bob"), "{main}");
+    assert!(!main.contains("Follow"), "{main}");
+    assert!(!main.contains("Like Reply Share"), "{main}");
+}
+
+#[test]
+fn threads_body_skips_profile_only_divs_before_post_text() {
+    let html = r#"<!doctype html>
+    <html><body>
+      <main>
+        <article>
+          <div>
+            <a href="/@alice">alice</a>
+          </div>
+          <div>Shipping the parser update with <a href="/@bob">@bob</a> today.</div>
+        </article>
+      </main>
+    </body></html>"#;
+    let doc = ParsedDocument::parse(
+        html,
+        Url::parse("https://www.threads.net/@alice/post/abc123").unwrap(),
+    );
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("chidori-social-thread"), "{main}");
+    assert!(main.contains("@bob"), "{main}");
+}
+
+#[test]
+fn threads_body_uses_nested_post_text_instead_of_profile_wrapper() {
+    let html = r#"<!doctype html>
+    <html><body>
+      <main>
+        <article>
+          <div>
+            <div><a href="/@alice">alice</a></div>
+            <div>Shipping the parser update with <a href="/@bob">@bob</a> today.</div>
+          </div>
+        </article>
+      </main>
+    </body></html>"#;
+    let doc = ParsedDocument::parse(
+        html,
+        Url::parse("https://www.threads.net/@alice/post/abc123").unwrap(),
+    );
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("chidori-social-thread"), "{main}");
+    assert!(main.contains("@bob"), "{main}");
+    assert!(!main.contains("href=\"/@alice\""), "{main}");
+}
+
+#[test]
+fn threads_thread_starts_at_requested_permalink() {
+    let html = r#"<!doctype html>
+    <html><body>
+      <main>
+        <article>
+          <header>
+            <a href="/@bob">bob</a>
+            <a href="/@bob/post/other"><time datetime="2026-05-08T14:00:00Z">May 8</time></a>
+          </header>
+          <div>Recommended post should not become the root.</div>
+        </article>
+        <article>
+          <header>
+            <a href="/@alice">alice</a>
+            <a href="https://www.threads.net/@alice/post/abc123"><time datetime="2026-05-08T15:04:00Z">May 8</time></a>
+          </header>
+          <div>Requested post text stays primary.</div>
+        </article>
+        <article>
+          <header>
+            <a href="/@reader">reader</a>
+          </header>
+          <div>This reply gives useful context.</div>
+        </article>
+      </main>
+    </body></html>"#;
+    let doc = ParsedDocument::parse(
+        html,
+        Url::parse("https://www.threads.net/@alice/post/abc123").unwrap(),
+    );
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(
+        main.contains("Requested post text stays primary."),
+        "{main}"
+    );
+    assert!(main.contains("This reply gives useful context."), "{main}");
+    assert!(
+        !main.contains("Recommended post should not become the root."),
+        "{main}"
+    );
+}
+
+#[test]
 fn extracts_canonical_meta_tags_and_richer_article_metadata() {
     let html = r#"<!doctype html>
     <html lang="en">
@@ -90,6 +371,146 @@ fn extracts_canonical_meta_tags_and_richer_article_metadata() {
         tag.name.as_deref() == Some("description")
             && tag.content.as_deref() == Some("A richer article")
     }));
+}
+
+#[test]
+fn extracts_author_and_published_from_dom_byline_near_heading() {
+    let html =
+        std::fs::read_to_string("tests/fixtures/reference/metadata--dom-author-date.html").unwrap();
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/story").unwrap());
+
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.title, "Metadata Heuristics");
+    assert_eq!(metadata.author, "Ada Lovelace");
+    assert_eq!(metadata.published, "2026-05-10T09:30:00Z");
+}
+
+#[test]
+fn placeholder_social_title_yields_to_extracted_content_title() {
+    let html = r#"<!doctype html>
+    <html>
+      <head>
+        <title>Just a moment</title>
+        <meta property="og:title" content="Untitled">
+      </head>
+      <body>
+        <article>
+          <h1>Semantic Article Title</h1>
+          <p>Hello world.</p>
+        </article>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata_with_content_title(&doc, Some("Extracted Article Title"));
+
+    assert_eq!(metadata.title, "Extracted Article Title");
+}
+
+#[test]
+fn dom_author_prefers_article_candidate_over_earlier_boilerplate() {
+    let html = r#"<!doctype html>
+    <html>
+      <body>
+        <aside class="related">
+          <p class="byline">By Related Story</p>
+          <a rel="author" href="/authors/site">Site Staff</a>
+        </aside>
+        <main>
+          <article>
+            <h1>Article Title</h1>
+            <p class="byline">By <a rel="author" href="/authors/ada">Ada Lovelace</a></p>
+            <p>Hello world.</p>
+          </article>
+        </main>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.author, "Ada Lovelace");
+}
+
+#[test]
+fn dom_author_prefers_article_text_byline_over_earlier_global_rel_author() {
+    let html = r#"<!doctype html>
+    <html>
+      <body>
+        <aside class="related">
+          <a rel="author" href="/authors/site">Site Staff</a>
+        </aside>
+        <main>
+          <article>
+            <h1>Article Title</h1>
+            <p class="byline">By Ada Lovelace</p>
+            <p>Hello world.</p>
+          </article>
+        </main>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.author, "Ada Lovelace");
+}
+
+#[test]
+fn dom_byline_strips_trailing_published_and_follow_text() {
+    let html = r#"<!doctype html>
+    <html>
+      <body>
+        <article>
+          <h1>Article Title</h1>
+          <p class="byline">By Ada Lovelace Published May 10, 2026 Follow</p>
+          <p>Hello world.</p>
+        </article>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.author, "Ada Lovelace");
+}
+
+#[test]
+fn dom_byline_keeps_follow_or_subscribe_inside_author_names() {
+    let html = r#"<!doctype html>
+    <html>
+      <body>
+        <article>
+          <h1>Article Title</h1>
+          <p class="byline">By Ada Followshaw Subscribe</p>
+          <p>Hello world.</p>
+        </article>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.author, "Ada Followshaw");
+}
+
+#[test]
+fn dom_published_prefers_article_dateline_over_earlier_time() {
+    let html = r#"<!doctype html>
+    <html>
+      <body>
+        <header>
+          <time datetime="2026-01-01T00:00:00Z">Updated navigation</time>
+        </header>
+        <main>
+          <article>
+            <h1>Article Title</h1>
+            <p class="dateline"><time datetime="2026-05-10T09:30:00Z">May 10, 2026</time></p>
+            <p>Hello world.</p>
+          </article>
+        </main>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.published, "2026-05-10T09:30:00Z");
 }
 
 #[test]
@@ -483,11 +904,70 @@ fn retries_with_body_when_entry_candidate_is_too_short() {
     </body></html>"#;
     let doc = ParsedDocument::parse(html, Url::parse("https://example.com/docs").unwrap());
 
-    let main = extract_main_html(&doc).unwrap();
+    let content = extract_main_content(&doc).unwrap();
+    let main = content.html;
 
+    assert!(content
+        .fallbacks
+        .contains(&"low-word-selector-retry".to_string()));
     assert!(main.contains("Runtime Rendered Documentation"));
     assert!(main.contains("useful documentation section"));
     assert!(main.contains("Agents need this text"));
+}
+
+#[test]
+fn retries_low_word_main_with_body_when_body_is_better_than_broad_candidate() {
+    let html = r#"
+    <html><body>
+      <main>
+        <h1>Loading Documentation</h1>
+        <p>Loading placeholder text has teaser words but not the actual useful documentation body yet.</p>
+      </main>
+      <div>
+        <p>This recovered section adds the complete documentation details needed by coding agents.</p>
+        <p>The body retry must still compare against the whole document when the broad retry keeps main.</p>
+      </div>
+    </body></html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/docs").unwrap());
+
+    let content = extract_main_content(&doc).unwrap();
+
+    assert_eq!(content.selector.as_deref(), Some("body"));
+    assert!(content
+        .fallbacks
+        .contains(&"low-word-selector-retry".to_string()));
+    assert!(content.html.contains("Loading Documentation"));
+    assert!(content.html.contains("complete documentation details"));
+}
+
+#[test]
+fn retries_low_word_article_with_body_when_body_is_better_than_broad_main() {
+    let html = r#"
+    <html><body>
+      <main>
+        <article>
+          <p>Loading preview only.</p>
+        </article>
+        <section>
+          <p>The main retry recovers useful documentation context for coding agents.</p>
+          <p>It includes setup steps and a concise explanation of the recovered page.</p>
+        </section>
+      </main>
+      <div>
+        <p>The body retry also preserves release notes, troubleshooting details, integration caveats, migration examples, and command output that the main region omitted.</p>
+        <p>This additional material makes the whole document substantially more complete than the broad main retry alone for agents reading the fetched page.</p>
+      </div>
+    </body></html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/docs").unwrap());
+
+    let content = extract_main_content(&doc).unwrap();
+
+    assert_eq!(content.selector.as_deref(), Some("body"));
+    assert!(content
+        .fallbacks
+        .contains(&"low-word-selector-retry".to_string()));
+    assert!(content.html.contains("useful documentation context"));
+    assert!(content.html.contains("troubleshooting details"));
 }
 
 #[test]
@@ -912,6 +1392,45 @@ fn unwraps_javascript_links_without_losing_inner_content() {
 }
 
 #[test]
+fn dom_cleanup_unwraps_javascript_links_without_dropping_nested_children() {
+    let html = r#"
+      <article>
+        <p>Keep <a href="javascript:void(0)"><strong>important</strong> text</a> here.</p>
+        <p>Keep <a href="/real">real link</a> too.</p>
+      </article>
+    "#;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+
+    assert!(cleaned.contains("<strong>important</strong> text"));
+    assert!(cleaned.contains("href=\"/real\""));
+    assert!(!cleaned.contains("javascript:void"));
+}
+
+#[test]
+fn dom_cleanup_removes_nested_noise_as_subtrees() {
+    let html = r#"
+      <article>
+        <p>Primary article text survives.</p>
+        <section class="related-posts">
+          <h2>Related posts</h2>
+          <article><a href="/a">First related card</a></article>
+          <article><a href="/b">Second related card</a></article>
+        </section>
+      </article>
+    "#;
+
+    let result = clean_html_with_report(html, &CleanOptions { no_images: false });
+
+    assert!(result.html.contains("Primary article text survives."));
+    assert!(!result.html.contains("First related card"));
+    assert!(result
+        .removals
+        .iter()
+        .any(|record| record.reason == "related-card-section"));
+}
+
+#[test]
 fn cleaner_strips_dangerous_attributes_from_remaining_elements() {
     let html = r#"
     <article>
@@ -1015,8 +1534,8 @@ fn cleaner_preserves_greater_than_inside_quoted_attributes() {
     let cleaned = clean_html(html, &CleanOptions { no_images: false });
     let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
 
-    assert!(cleaned.contains(r#"title="2 &gt; 1""#));
-    assert!(cleaned.contains(r#"data-note="a &gt; b""#));
+    assert!(cleaned.contains(r#"title="2 > 1""#));
+    assert!(cleaned.contains(r#"data-note="a > b""#));
     assert!(markdown.contains("Keep comparison text."));
     assert!(markdown.contains("Keep single quoted comparison."));
 }
@@ -1192,6 +1711,63 @@ fn converts_footnotes_to_markdown_references() {
     assert!(markdown.contains("cited claims[^1] readable."));
     assert!(markdown.contains("[^1]: Footnote text survives."));
     assert!(!markdown.contains("↩"));
+}
+
+#[test]
+fn converts_path_fragment_footnote_links_to_markdown_references() {
+    let html = r##"
+    <article>
+      <p>The parser keeps cited claims<sup><a href="/post#fn-1">1</a></sup> readable.</p>
+      <section id="footnotes">
+        <ol>
+          <li id="fn-1"><p>Path fragment footnote text. <a class="footnote-backref" href="/post#fnref-1">↩</a></p></li>
+        </ol>
+      </section>
+    </article>"##;
+
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(
+        markdown.contains("cited claims[^1] readable."),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("[^1]: Path fragment footnote text."),
+        "{markdown}"
+    );
+    assert!(!markdown.contains("/post#fn-1"), "{markdown}");
+    assert!(!markdown.contains("↩"), "{markdown}");
+}
+
+#[test]
+fn converts_wordpress_block_footnotes_to_markdown_references() {
+    let html = std::fs::read_to_string("tests/fixtures/reference/footnotes--wordpress-block.html")
+        .unwrap();
+    let markdown = html_to_markdown(&html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("note[^1]."));
+    assert!(markdown.contains("[^1]: WordPress block footnote text."));
+    assert!(!markdown.contains("↩"));
+}
+
+#[test]
+fn ignores_non_footnotes_with_fn_like_attribute_values() {
+    let html = r##"
+    <article>
+      <p>
+        Inline label<sup class="fn-label">x</sup>
+        and id label<sup id="fn-label">label</sup>
+        and anchor<sup><a href="#not-fn-1">not a footnote</a></sup>.
+      </p>
+    </article>"##;
+
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(!markdown.contains("[^label]"));
+    assert!(!markdown.contains("[^1]"));
+    assert!(markdown.contains("x"));
+    assert!(markdown.contains("label"));
+    assert!(markdown.contains("#not-fn-1"));
 }
 
 #[test]
@@ -1413,8 +1989,8 @@ fn cleaner_treats_non_ascii_less_than_text_as_text() {
 
     let cleaned = clean_html(html, &CleanOptions { no_images: false });
 
-    assert!(cleaned.contains("It<’s text"));
-    assert!(cleaned.contains("Use <— as text"));
+    assert!(cleaned.contains("It&lt;’s text"));
+    assert!(cleaned.contains("Use &lt;— as text"));
 }
 
 #[test]
@@ -1424,7 +2000,7 @@ fn cleaner_preserves_ascii_less_than_comparison_text() {
     let cleaned = clean_html(html, &CleanOptions { no_images: false });
     let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
 
-    assert!(cleaned.contains("value < 2 > 1"));
+    assert!(cleaned.contains("value &lt; 2 &gt; 1"));
     assert!(markdown.contains(r"value \< 2 \> 1"), "{markdown}");
 }
 

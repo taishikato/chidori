@@ -1,6 +1,7 @@
 use chidori::{
     cleaner::{clean_html, CleanOptions},
     document::ParsedDocument,
+    extractor::extract_main_content,
     extractor::extract_main_html,
     markdown::{html_to_markdown, MarkdownOptions},
 };
@@ -39,6 +40,33 @@ fn assert_occurs_once(markdown: &str, snippet: &str) {
         1,
         "expected markdown to contain {snippet:?} exactly once\n\n{markdown}"
     );
+}
+
+#[test]
+fn ai_conversation_reference_extracts_turns() {
+    let html =
+        std::fs::read_to_string("tests/fixtures/reference/domain--ai-conversation.html").unwrap();
+    let doc = ParsedDocument::parse(
+        html,
+        Url::parse("https://chatgpt.com/share/example").unwrap(),
+    );
+    let extracted = extract_main_content(&doc).unwrap();
+    assert_eq!(extracted.selector.as_deref(), Some("ai-conversation"));
+
+    let markdown = fixture_to_markdown(
+        "domain--ai-conversation.html",
+        "https://chatgpt.com/share/example",
+    );
+
+    assert_contains_all(
+        &markdown,
+        &[
+            "Can you summarize the parser issue?",
+            "The parser selected a sidebar before the article body.",
+            "Add a fixture where the body fallback must win.",
+        ],
+    );
+    assert_contains_none(&markdown, &["Upgrade plan", "Message controls"]);
 }
 
 #[test]
@@ -344,6 +372,42 @@ fn video_watch_reference_uses_only_primary_watch_content() {
 }
 
 #[test]
+fn lwn_article_reference_extracts_article_text() {
+    let markdown = fixture_to_markdown(
+        "domain--lwn-article.html",
+        "https://lwn.net/Articles/123456/",
+    );
+
+    assert_contains_all(
+        &markdown,
+        &[
+            "# A kernel story",
+            "The kernel community discussed a careful change",
+            "hidden assumptions",
+        ],
+    );
+    assert_contains_none(&markdown, &["Subscriber comments"]);
+}
+
+#[test]
+fn leetcode_problem_reference_extracts_problem_statement() {
+    let markdown = fixture_to_markdown(
+        "domain--leetcode-problem.html",
+        "https://leetcode.com/problems/two-sum/",
+    );
+
+    assert_contains_all(
+        &markdown,
+        &[
+            "# 1. Two Sum",
+            "Given an array of integers nums",
+            "Input: nums = [2,7,11,15], target = 9",
+        ],
+    );
+    assert_contains_none(&markdown, &["Problems Discuss Store", "Similar Questions"]);
+}
+
+#[test]
 fn reddit_reference_reply_is_nested_once() {
     let markdown = fixture_to_markdown(
         "domain--reddit-discussion.html",
@@ -437,6 +501,77 @@ fn microblog_status_thread_keeps_primary_status_and_replies_only() {
     assert_occurs_once(&markdown, "Chidori Parser");
     assert_occurs_once(&markdown, "Reader Fox");
     assert_occurs_once(&markdown, "Quote Cat");
+}
+
+#[test]
+fn bluesky_thread_reference_extracts_post_and_reply() {
+    let markdown = fixture_to_markdown(
+        "domain--bluesky-thread.html",
+        "https://bsky.app/profile/alice.bsky.social/post/abc123",
+    );
+    assert_contains_all(
+        &markdown,
+        &["Alice Example", "Bluesky extraction keeps", "> Bob Example"],
+    );
+    assert_contains_none(&markdown, &["Trending topics"]);
+    assert_occurs_once(&markdown, "Alice Example");
+    assert_occurs_once(
+        &markdown,
+        "Bluesky extraction keeps the primary post readable.",
+    );
+    assert_occurs_once(&markdown, "Bob Example");
+    assert_occurs_once(&markdown, "A reply should remain subordinate.");
+}
+
+#[test]
+fn threads_post_reference_extracts_post_and_reply() {
+    let markdown = fixture_to_markdown(
+        "domain--threads-post.html",
+        "https://www.threads.net/@alice/post/abc123",
+    );
+    assert_contains_all(
+        &markdown,
+        &["alice", "Threads extraction should keep", "> reader"],
+    );
+    assert_contains_none(
+        &markdown,
+        &["For You Following", "Follow", "Like Reply Share"],
+    );
+    assert_occurs_once(&markdown, "alice");
+    assert_occurs_once(&markdown, "Threads extraction should keep the post text.");
+    assert_occurs_once(&markdown, "reader");
+    assert_occurs_once(&markdown, "This reply gives useful context.");
+}
+
+#[test]
+fn threads_profile_reference_does_not_format_articles_as_thread_replies() {
+    let markdown = fixture_to_markdown(
+        "domain--threads-post.html",
+        "https://www.threads.net/@alice",
+    );
+
+    assert_contains_all(
+        &markdown,
+        &["alice", "Threads extraction should keep", "reader"],
+    );
+    assert_contains_none(&markdown, &["> reader"]);
+}
+
+#[test]
+fn linkedin_post_reference_extracts_post_body() {
+    let markdown = fixture_to_markdown(
+        "domain--linkedin-post.html",
+        "https://www.linkedin.com/posts/example",
+    );
+    assert_contains_all(
+        &markdown,
+        &[
+            "Ada Lovelace",
+            "LinkedIn extraction should preserve",
+            "[Read the report](https://example.com/report)",
+        ],
+    );
+    assert_contains_none(&markdown, &["Promoted jobs"]);
 }
 
 #[test]

@@ -1,3 +1,4 @@
+use kuchiki::traits::TendrilSink;
 use scraper::{Html, Selector};
 use serde::Serialize;
 
@@ -33,22 +34,116 @@ pub fn clean_html_preserving_hidden_with_report(html: &str, options: &CleanOptio
     clean_html_inner(html, options, false)
 }
 
+fn parse_fragment_document(html: &str) -> kuchiki::NodeRef {
+    let html = normalize_unquoted_self_closing_slashes(html);
+    kuchiki::parse_html().one(format!("<html><body>{html}</body></html>"))
+}
+
+fn serialize_body_inner(document: &kuchiki::NodeRef) -> String {
+    let Ok(body) = document.select_first("body") else {
+        return String::new();
+    };
+    body.as_node()
+        .children()
+        .map(|child| child.to_string())
+        .collect::<String>()
+}
+
+fn normalize_unquoted_self_closing_slashes(html: &str) -> String {
+    let mut output = String::with_capacity(html.len());
+    let mut rest = html;
+
+    while let Some(index) = rest.find('<') {
+        output.push_str(&rest[..index]);
+        let candidate = &rest[index..];
+        let Some(end) = opening_tag_end(candidate) else {
+            output.push_str(candidate);
+            return output;
+        };
+        let opening_tag = &candidate[..=end];
+        output.push_str(&normalize_self_closing_opening_tag(opening_tag));
+        rest = &candidate[end + 1..];
+    }
+
+    output.push_str(rest);
+    output
+}
+
+fn normalize_self_closing_opening_tag(opening_tag: &str) -> String {
+    let Some(input) = opening_tag
+        .strip_prefix('<')
+        .and_then(|value| value.strip_suffix('>'))
+    else {
+        return opening_tag.to_string();
+    };
+    let input = input.trim_start();
+    if input.starts_with('/') || input.starts_with('!') || input.starts_with('?') {
+        return opening_tag.to_string();
+    }
+
+    let name_end = input
+        .find(|ch: char| ch.is_ascii_whitespace() || ch == '/')
+        .unwrap_or(input.len());
+    let tag_name = &input[..name_end];
+    if !is_void_element(tag_name) || !opening_tag.ends_with("/>") {
+        return opening_tag.to_string();
+    }
+
+    let Some(before_slash) = opening_tag.strip_suffix("/>") else {
+        return opening_tag.to_string();
+    };
+    if trailing_unquoted_attribute_name(before_slash).is_none_or(is_url_attribute) {
+        return opening_tag.to_string();
+    }
+
+    format!("{before_slash} />")
+}
+
+fn is_void_element(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "area"
+            | "base"
+            | "br"
+            | "col"
+            | "embed"
+            | "hr"
+            | "img"
+            | "input"
+            | "link"
+            | "meta"
+            | "param"
+            | "source"
+            | "track"
+            | "wbr"
+    )
+}
+
 fn clean_html_inner(html: &str, options: &CleanOptions, remove_hidden: bool) -> CleanResult {
-    let mut cleaned = html.to_string();
+    let document = parse_fragment_document(html);
     let mut removals = Vec::new();
+
     for tag in [
         "script", "style", "noscript", "nav", "footer", "aside", "button", "form", "iframe",
         "object", "embed",
     ] {
-        let next = remove_tag(&cleaned, tag);
-        push_removal_if_changed(&mut removals, &cleaned, &next, "noise-tag", tag);
-        cleaned = next;
+        remove_dom_selector(&document, tag, "noise-tag", tag, &mut removals);
     }
     if remove_hidden {
-        let next = remove_hidden_elements(&cleaned);
-        push_removal_if_changed(&mut removals, &cleaned, &next, "hidden-element", "[hidden]");
-        cleaned = next;
+        remove_dom_selector(
+            &document,
+            "[hidden], [aria-hidden=\"true\"], .hidden, .sr-only",
+            "hidden-element",
+            "[hidden], [aria-hidden=\"true\"], .hidden, .sr-only",
+            &mut removals,
+        );
+        remove_dom_hidden_style_elements(&document, &mut removals);
     }
+    unwrap_dom_javascript_links(&document);
+    strip_dom_dangerous_attributes(&document);
+
+    let mut cleaned = serialize_body_inner(&document);
+
     let next = remove_navigation_like_blocks(&cleaned);
     push_removal_if_changed(
         &mut removals,
@@ -88,8 +183,7 @@ fn clean_html_inner(html: &str, options: &CleanOptions, remove_hidden: bool) -> 
         "section",
     );
     cleaned = next;
-    cleaned = unwrap_javascript_links(&cleaned);
-    cleaned = strip_dangerous_attributes(&cleaned);
+
     if options.no_images {
         let next = remove_tag(&cleaned, "img");
         push_removal_if_changed(&mut removals, &cleaned, &next, "image-disabled", "img");
@@ -123,6 +217,116 @@ fn push_removal_if_changed(
     });
 }
 
+fn remove_dom_selector(
+    document: &kuchiki::NodeRef,
+    selector: &str,
+    reason: &str,
+    report_selector: &str,
+    removals: &mut Vec<RemovalRecord>,
+) {
+    let Ok(matches) = document.select(selector) else {
+        return;
+    };
+    let nodes = matches
+        .map(|matched| matched.as_node().clone())
+        .collect::<Vec<_>>();
+    let count = nodes.len();
+    if count == 0 {
+        return;
+    }
+    for node in nodes {
+        node.detach();
+    }
+    removals.push(RemovalRecord {
+        step: "clean-html".to_string(),
+        reason: reason.to_string(),
+        selector: report_selector.to_string(),
+        count,
+    });
+}
+
+fn unwrap_dom_javascript_links(document: &kuchiki::NodeRef) {
+    let Ok(matches) = document.select("a[href]") else {
+        return;
+    };
+    let nodes = matches
+        .filter_map(|matched| {
+            let attrs = matched.attributes.borrow();
+            let href = attrs.get("href")?;
+            href.trim_start()
+                .to_ascii_lowercase()
+                .starts_with("javascript:")
+                .then(|| matched.as_node().clone())
+        })
+        .collect::<Vec<_>>();
+
+    for node in nodes {
+        let children = node.children().collect::<Vec<_>>();
+        for child in children {
+            node.insert_before(child);
+        }
+        node.detach();
+    }
+}
+
+fn remove_dom_hidden_style_elements(
+    document: &kuchiki::NodeRef,
+    removals: &mut Vec<RemovalRecord>,
+) {
+    let Ok(matches) = document.select("[style]") else {
+        return;
+    };
+    let nodes = matches
+        .filter_map(|matched| {
+            let attrs = matched.attributes.borrow();
+            let style = attrs.get("style")?;
+            is_hidden_style_value(style).then(|| matched.as_node().clone())
+        })
+        .collect::<Vec<_>>();
+    let count = nodes.len();
+    if count == 0 {
+        return;
+    }
+    for node in nodes {
+        node.detach();
+    }
+    removals.push(RemovalRecord {
+        step: "clean-html".to_string(),
+        reason: "hidden-element".to_string(),
+        selector: "[style]".to_string(),
+        count,
+    });
+}
+
+fn is_hidden_style_value(value: &str) -> bool {
+    let normalized = value
+        .chars()
+        .filter(|ch| !ch.is_ascii_whitespace())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    normalized.contains("display:none") || normalized.contains("visibility:hidden")
+}
+
+fn strip_dom_dangerous_attributes(document: &kuchiki::NodeRef) {
+    let Ok(matches) = document.select("*") else {
+        return;
+    };
+    for matched in matches {
+        let mut attrs = matched.attributes.borrow_mut();
+        let names = attrs
+            .map
+            .keys()
+            .map(|name| name.local.to_string())
+            .collect::<Vec<_>>();
+        for name in names {
+            let value = attrs.get(name.as_str()).map(ToString::to_string);
+            if is_dangerous_attribute(&name, value.as_deref()) {
+                attrs.remove(name.as_str());
+            }
+        }
+    }
+}
+
 fn removed_element_count(before: &str, after: &str, selector: &str) -> usize {
     let Ok(selector) = Selector::parse(selector) else {
         return 0;
@@ -134,16 +338,6 @@ fn removed_element_count(before: &str, after: &str, selector: &str) -> usize {
         .select(&selector)
         .count()
         .saturating_sub(after.select(&selector).count())
-}
-
-fn remove_hidden_elements(html: &str) -> String {
-    let mut cleaned = html.to_string();
-    for tag in [
-        "div", "section", "article", "header", "span", "p", "ul", "ol", "li",
-    ] {
-        cleaned = remove_matching_tags_where(&cleaned, tag, is_hidden_opening_tag);
-    }
-    cleaned
 }
 
 fn remove_navigation_like_blocks(html: &str) -> String {
@@ -330,56 +524,11 @@ fn remove_link_dense_related_sections(html: &str) -> String {
     })
 }
 
-fn is_hidden_opening_tag(opening_tag: &str) -> bool {
-    has_attribute(opening_tag, "hidden")
-        || attribute_value_eq(opening_tag, "aria-hidden", "true")
-        || attribute_value_contains_normalized(opening_tag, "style", "display:none")
-        || attribute_value_contains_normalized(opening_tag, "style", "visibility:hidden")
-        || has_class_token(opening_tag, "hidden")
-        || has_class_token(opening_tag, "sr-only")
-}
-
-fn unwrap_javascript_links(html: &str) -> String {
-    unwrap_matching_tags_where(html, "a", |opening_tag| {
-        attribute_values(opening_tag, "href").any(|href| {
-            href.trim_start()
-                .to_ascii_lowercase()
-                .starts_with("javascript:")
-        })
-    })
-}
-
-fn strip_dangerous_attributes(html: &str) -> String {
-    let mut output = String::with_capacity(html.len());
-    let mut rest = html;
-
-    while let Some(index) = rest.find('<') {
-        output.push_str(&rest[..index]);
-        let candidate = &rest[index..];
-        if !candidate.chars().nth(1).is_some_and(is_tag_start_character) {
-            output.push('<');
-            rest = &candidate[1..];
-            continue;
-        }
-        let Some(end) = opening_tag_end(candidate) else {
-            output.push_str(candidate);
-            return output;
-        };
-        let opening_tag = &candidate[..=end];
-        if opening_tag.starts_with("</") || opening_tag.starts_with("<!--") {
-            output.push_str(opening_tag);
-        } else {
-            output.push_str(&sanitize_opening_tag(opening_tag));
-        }
-        rest = &candidate[end + 1..];
-    }
-
-    output.push_str(rest);
-    output
-}
-
-fn is_tag_start_character(character: char) -> bool {
-    character.is_ascii_alphabetic() || matches!(character, '/' | '!' | '?')
+fn is_url_attribute(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "href" | "src" | "action" | "formaction" | "xlink:href"
+    )
 }
 
 fn opening_tag_end(input: &str) -> Option<usize> {
@@ -398,70 +547,6 @@ fn opening_tag_end(input: &str) -> Option<usize> {
     None
 }
 
-fn sanitize_opening_tag(opening_tag: &str) -> String {
-    let input = opening_tag
-        .strip_prefix('<')
-        .and_then(|value| value.strip_suffix('>'))
-        .unwrap_or(opening_tag)
-        .trim();
-    let (input, self_closing) = split_self_closing_marker(input);
-    let name_end = input
-        .find(|ch: char| ch.is_ascii_whitespace() || ch == '/')
-        .unwrap_or(input.len());
-    let tag_name = &input[..name_end];
-    if tag_name.is_empty() {
-        return opening_tag.to_string();
-    }
-
-    let mut output = format!("<{tag_name}");
-    for (name, value) in (OpeningAttributes {
-        input: &input[name_end..],
-    }) {
-        let value = value.map(html_escape::decode_html_entities);
-        if is_dangerous_attribute(name, value.as_deref()) {
-            continue;
-        }
-
-        output.push(' ');
-        output.push_str(name);
-        if let Some(value) = value.as_deref() {
-            output.push_str("=\"");
-            output.push_str(&html_escape::encode_double_quoted_attribute(value));
-            output.push('"');
-        }
-    }
-    if self_closing {
-        output.push_str(" /");
-    }
-    output.push('>');
-    output
-}
-
-fn split_self_closing_marker(input: &str) -> (&str, bool) {
-    let trimmed = input.trim_end();
-    let Some(before_slash) = trimmed.strip_suffix('/') else {
-        return (trimmed, false);
-    };
-
-    let before_slash = before_slash.trim_end();
-    let Some(previous) = before_slash.chars().last() else {
-        return (trimmed, false);
-    };
-
-    if previous.is_ascii_whitespace()
-        || matches!(previous, '"' | '\'')
-        || !before_slash
-            .chars()
-            .any(|character| character.is_ascii_whitespace() || character == '=')
-        || trailing_unquoted_attribute_name(before_slash)
-            .is_some_and(|name| !is_url_attribute(name))
-    {
-        (before_slash, true)
-    } else {
-        (trimmed, false)
-    }
-}
-
 fn trailing_unquoted_attribute_name(input: &str) -> Option<&str> {
     let value_start = input.rfind('=')? + 1;
     let value = input[value_start..].trim_start();
@@ -474,13 +559,6 @@ fn trailing_unquoted_attribute_name(input: &str) -> Option<&str> {
         .rfind(|character: char| character.is_ascii_whitespace() || character == '/')
         .map_or(0, |index| index + 1);
     (name_start < name_end).then_some(&input[name_start..name_end])
-}
-
-fn is_url_attribute(name: &str) -> bool {
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "href" | "src" | "action" | "formaction" | "xlink:href"
-    )
 }
 
 fn is_dangerous_attribute(name: &str, value: Option<&str>) -> bool {
@@ -509,28 +587,9 @@ fn class_tokens(opening_tag: &str) -> impl Iterator<Item = &str> {
     attribute_values(opening_tag, "class").flat_map(|value| value.split_ascii_whitespace())
 }
 
-fn has_attribute(opening_tag: &str, expected: &str) -> bool {
-    opening_attributes(opening_tag).any(|(name, _)| name.eq_ignore_ascii_case(expected))
-}
-
 fn attribute_value_eq(opening_tag: &str, expected: &str, expected_value: &str) -> bool {
     attribute_values(opening_tag, expected)
         .any(|value| value.trim().eq_ignore_ascii_case(expected_value))
-}
-
-fn attribute_value_contains_normalized(
-    opening_tag: &str,
-    expected: &str,
-    expected_value: &str,
-) -> bool {
-    attribute_values(opening_tag, expected).any(|value| {
-        value
-            .chars()
-            .filter(|ch| !ch.is_ascii_whitespace())
-            .collect::<String>()
-            .to_ascii_lowercase()
-            .contains(expected_value)
-    })
 }
 
 fn attribute_values<'a>(
@@ -701,49 +760,6 @@ fn remove_matching_tags_by_content_and_tail(
                             continue;
                         }
                     }
-                }
-            }
-        }
-
-        output.push('<');
-        rest = &candidate[1..];
-    }
-
-    output.push_str(rest);
-    output
-}
-
-fn unwrap_matching_tags_where(
-    html: &str,
-    tag: &str,
-    should_unwrap: impl Fn(&str) -> bool,
-) -> String {
-    let mut output = String::with_capacity(html.len());
-    let mut rest = html;
-    let mut suppressed_closing_tags = 0usize;
-
-    while let Some(index) = rest.find('<') {
-        output.push_str(&rest[..index]);
-        let candidate = &rest[index..];
-        let after_name = &candidate[1..];
-
-        if closing_tag_name_matches(after_name, tag) {
-            if let Some(end) = candidate.find('>') {
-                if suppressed_closing_tags > 0 {
-                    suppressed_closing_tags -= 1;
-                    rest = &candidate[end + 1..];
-                    continue;
-                }
-            }
-        } else if tag_name_matches(after_name, tag) {
-            if let Some(end) = candidate.find('>') {
-                let opening_tag = &candidate[..=end];
-                if should_unwrap(opening_tag) {
-                    if !opening_tag.ends_with("/>") {
-                        suppressed_closing_tags += 1;
-                    }
-                    rest = &candidate[end + 1..];
-                    continue;
                 }
             }
         }
