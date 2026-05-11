@@ -912,6 +912,45 @@ fn unwraps_javascript_links_without_losing_inner_content() {
 }
 
 #[test]
+fn dom_cleanup_unwraps_javascript_links_without_dropping_nested_children() {
+    let html = r#"
+      <article>
+        <p>Keep <a href="javascript:void(0)"><strong>important</strong> text</a> here.</p>
+        <p>Keep <a href="/real">real link</a> too.</p>
+      </article>
+    "#;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+
+    assert!(cleaned.contains("<strong>important</strong> text"));
+    assert!(cleaned.contains("href=\"/real\""));
+    assert!(!cleaned.contains("javascript:void"));
+}
+
+#[test]
+fn dom_cleanup_removes_nested_noise_as_subtrees() {
+    let html = r#"
+      <article>
+        <p>Primary article text survives.</p>
+        <section class="related-posts">
+          <h2>Related posts</h2>
+          <article><a href="/a">First related card</a></article>
+          <article><a href="/b">Second related card</a></article>
+        </section>
+      </article>
+    "#;
+
+    let result = clean_html_with_report(html, &CleanOptions { no_images: false });
+
+    assert!(result.html.contains("Primary article text survives."));
+    assert!(!result.html.contains("First related card"));
+    assert!(result
+        .removals
+        .iter()
+        .any(|record| record.reason == "related-card-section"));
+}
+
+#[test]
 fn cleaner_strips_dangerous_attributes_from_remaining_elements() {
     let html = r#"
     <article>
@@ -1015,8 +1054,8 @@ fn cleaner_preserves_greater_than_inside_quoted_attributes() {
     let cleaned = clean_html(html, &CleanOptions { no_images: false });
     let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
 
-    assert!(cleaned.contains(r#"title="2 &gt; 1""#));
-    assert!(cleaned.contains(r#"data-note="a &gt; b""#));
+    assert!(cleaned.contains(r#"title="2 > 1""#));
+    assert!(cleaned.contains(r#"data-note="a > b""#));
     assert!(markdown.contains("Keep comparison text."));
     assert!(markdown.contains("Keep single quoted comparison."));
 }
@@ -1413,8 +1452,8 @@ fn cleaner_treats_non_ascii_less_than_text_as_text() {
 
     let cleaned = clean_html(html, &CleanOptions { no_images: false });
 
-    assert!(cleaned.contains("It<’s text"));
-    assert!(cleaned.contains("Use <— as text"));
+    assert!(cleaned.contains("It&lt;’s text"));
+    assert!(cleaned.contains("Use &lt;— as text"));
 }
 
 #[test]
@@ -1424,7 +1463,7 @@ fn cleaner_preserves_ascii_less_than_comparison_text() {
     let cleaned = clean_html(html, &CleanOptions { no_images: false });
     let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
 
-    assert!(cleaned.contains("value < 2 > 1"));
+    assert!(cleaned.contains("value &lt; 2 &gt; 1"));
     assert!(markdown.contains(r"value \< 2 \> 1"), "{markdown}");
 }
 
