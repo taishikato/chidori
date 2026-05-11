@@ -387,6 +387,27 @@ fn extracts_author_and_published_from_dom_byline_near_heading() {
 }
 
 #[test]
+fn metadata_prefers_scoped_article_byline_over_global_author_chrome() {
+    let html =
+        std::fs::read_to_string("tests/fixtures/reference/metadata--article-bylines.html").unwrap();
+    let doc = ParsedDocument::parse(
+        html,
+        Url::parse("https://example.com/report/metadata-accuracy").unwrap(),
+    );
+
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.title, "Metadata Accuracy Example");
+    assert_eq!(metadata.site, "Example Daily");
+    assert_eq!(metadata.author, "Ada Lovelace and Grace Hopper");
+    assert_eq!(metadata.published, "2026-05-10T12:34:00Z");
+    assert_eq!(
+        metadata.canonical_url,
+        "https://example.com/report/metadata-accuracy"
+    );
+}
+
+#[test]
 fn placeholder_social_title_yields_to_extracted_content_title() {
     let html = r#"<!doctype html>
     <html>

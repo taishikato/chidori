@@ -350,12 +350,12 @@ fn time_datetime(doc: &ParsedDocument) -> Option<String> {
 fn published_near_h1(doc: &ParsedDocument) -> Option<String> {
     published_datetime_for_selector(
         doc,
-        r#"article .date time[datetime], article .dateline time[datetime], article .published time[datetime], article [class*="date"] time[datetime]"#,
+        r#"article time[datetime], article .date time[datetime], article .dateline time[datetime], article .published time[datetime], article [class*="date"] time[datetime]"#,
     )
     .or_else(|| {
         published_datetime_for_selector(
             doc,
-            r#"main .date time[datetime], main .dateline time[datetime], main .published time[datetime], main [class*="date"] time[datetime]"#,
+            r#"main time[datetime], main .date time[datetime], main .dateline time[datetime], main .published time[datetime], main [class*="date"] time[datetime]"#,
         )
     })
     .or_else(|| {
@@ -381,14 +381,14 @@ fn scoped_author(doc: &ParsedDocument) -> Option<String> {
 }
 
 fn scoped_article_author(doc: &ParsedDocument) -> Option<String> {
-    rel_author_for_selector(
+    byline_author_for_selector(
         doc,
-        r#"article a[rel~="author"], article address[rel~="author"]"#,
+        r#"article .byline, article [class*="byline"], article [itemprop="author"], article [rel~="author"]"#,
     )
     .or_else(|| {
-        byline_author_for_selector(
+        rel_author_for_selector(
             doc,
-            r#"article .byline, article [class*="byline"], article [itemprop="author"]"#,
+            r#"article a[rel~="author"], article address[rel~="author"]"#,
         )
     })
 }
@@ -451,6 +451,9 @@ fn strip_byline_prefix(value: &str) -> &str {
         .or_else(|| value.strip_prefix("by "))
         .or_else(|| value.strip_prefix("BY "))
         .or_else(|| value.strip_prefix("By:"))
+        .or_else(|| value.strip_prefix("Written by "))
+        .or_else(|| value.strip_prefix("written by "))
+        .or_else(|| value.strip_prefix("Author:"))
         .map(str::trim)
         .unwrap_or(value)
 }
@@ -458,9 +461,16 @@ fn strip_byline_prefix(value: &str) -> &str {
 fn trim_trailing_byline_noise(value: &str) -> &str {
     let lower = value.to_ascii_lowercase();
     let mut end = value.len();
-    for marker in [" published ", " updated ", " posted "] {
+    for marker in [" published ", " updated ", " posted ", " on ", " in "] {
         if let Some(index) = lower.find(marker) {
-            end = end.min(index);
+            if marker.trim() == "on" || marker.trim() == "in" {
+                let before = value[..index].split_whitespace().count();
+                if before >= 2 {
+                    end = end.min(index);
+                }
+            } else {
+                end = end.min(index);
+            }
         }
     }
     for marker in [" follow", " subscribe"] {
