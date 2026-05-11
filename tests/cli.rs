@@ -479,6 +479,45 @@ async fn json_debug_records_hidden_content_fallback() {
 }
 
 #[tokio::test]
+async fn json_debug_reports_low_word_retry_decision() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/low-word-retry"))
+        .respond_with(html_response(
+            r#"
+            <html><body>
+              <article><p>Loading...</p></article>
+              <main>
+                <h1>Recovered Article</h1>
+                <p>This recovered body has enough words to prove that a broader fallback won.</p>
+                <p>The debug payload should explain which retry path selected it.</p>
+              </main>
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let output = Command::cargo_bin("chidori")
+        .unwrap()
+        .arg(format!("{}/low-word-retry", server.uri()))
+        .arg("--json")
+        .arg("--debug")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["debug"]["contentSelector"], "main");
+    assert!(json["debug"]["fallbacks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|value| value == "low-word-selector-retry"));
+    assert_eq!(json["debug"]["retryClass"], "low-word-selector-retry");
+}
+
+#[tokio::test]
 async fn json_debug_recovers_hidden_content_when_visible_body_is_shell_text() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

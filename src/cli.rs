@@ -237,12 +237,17 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
     } else {
         crate::output::RenderMode::Markdown
     };
+    let retry_class = fallback_steps
+        .last()
+        .cloned()
+        .or_else(|| extraction.fallbacks.last().cloned());
     let debug = config.debug.then(|| crate::output::DebugDiagnostics {
         extraction_path: extraction.path.to_string(),
         fallbacks: fallback_steps,
         word_count: metadata.word_count,
         content_selector: extraction.content_selector.clone(),
         content_score: extraction.content_score,
+        retry_class,
         removals: extraction.removals.clone(),
         timings: crate::output::DebugTimings {
             total_ms: started.elapsed().as_millis(),

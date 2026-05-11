@@ -483,11 +483,70 @@ fn retries_with_body_when_entry_candidate_is_too_short() {
     </body></html>"#;
     let doc = ParsedDocument::parse(html, Url::parse("https://example.com/docs").unwrap());
 
-    let main = extract_main_html(&doc).unwrap();
+    let content = extract_main_content(&doc).unwrap();
+    let main = content.html;
 
+    assert!(content
+        .fallbacks
+        .contains(&"low-word-selector-retry".to_string()));
     assert!(main.contains("Runtime Rendered Documentation"));
     assert!(main.contains("useful documentation section"));
     assert!(main.contains("Agents need this text"));
+}
+
+#[test]
+fn retries_low_word_main_with_body_when_body_is_better_than_broad_candidate() {
+    let html = r#"
+    <html><body>
+      <main>
+        <h1>Loading Documentation</h1>
+        <p>Loading placeholder text has teaser words but not the actual useful documentation body yet.</p>
+      </main>
+      <div>
+        <p>This recovered section adds the complete documentation details needed by coding agents.</p>
+        <p>The body retry must still compare against the whole document when the broad retry keeps main.</p>
+      </div>
+    </body></html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/docs").unwrap());
+
+    let content = extract_main_content(&doc).unwrap();
+
+    assert_eq!(content.selector.as_deref(), Some("body"));
+    assert!(content
+        .fallbacks
+        .contains(&"low-word-selector-retry".to_string()));
+    assert!(content.html.contains("Loading Documentation"));
+    assert!(content.html.contains("complete documentation details"));
+}
+
+#[test]
+fn retries_low_word_article_with_body_when_body_is_better_than_broad_main() {
+    let html = r#"
+    <html><body>
+      <main>
+        <article>
+          <p>Loading preview only.</p>
+        </article>
+        <section>
+          <p>The main retry recovers useful documentation context for coding agents.</p>
+          <p>It includes setup steps and a concise explanation of the recovered page.</p>
+        </section>
+      </main>
+      <div>
+        <p>The body retry also preserves release notes, troubleshooting details, integration caveats, migration examples, and command output that the main region omitted.</p>
+        <p>This additional material makes the whole document substantially more complete than the broad main retry alone for agents reading the fetched page.</p>
+      </div>
+    </body></html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/docs").unwrap());
+
+    let content = extract_main_content(&doc).unwrap();
+
+    assert_eq!(content.selector.as_deref(), Some("body"));
+    assert!(content
+        .fallbacks
+        .contains(&"low-word-selector-retry".to_string()));
+    assert!(content.html.contains("useful documentation context"));
+    assert!(content.html.contains("troubleshooting details"));
 }
 
 #[test]

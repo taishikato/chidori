@@ -31,6 +31,7 @@ const PRIMARY_ENTRY_SELECTORS: &[&str] = &[
 ];
 
 const BODY_FALLBACK_SELECTORS: &[&str] = &["body"];
+const BROAD_RETRY_SELECTORS: &[&str] = &["main", "[role=\"main\"]", "article", "body"];
 const LOW_WORD_COUNT_RETRY_THRESHOLD: usize = 50;
 const RETRY_MIN_GAIN_MULTIPLIER: usize = 2;
 const ARTICLE_RETRY_PROTECTION_MIN_WORDS: usize = 10;
@@ -216,13 +217,28 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
         if let Some(candidate) = best_candidate
             .as_ref()
             .filter(|candidate| candidate.word_count < LOW_WORD_COUNT_RETRY_THRESHOLD)
+            .cloned()
         {
-            if let Some(body_candidate) =
+            let broad_retry_candidate =
+                best_candidate_for_selectors(doc, BROAD_RETRY_SELECTORS, &selectors, false)?
+                    .filter(|broad_candidate| should_retry_with_body(&candidate, broad_candidate));
+            let body_retry_candidate =
                 best_candidate_for_selectors(doc, BODY_FALLBACK_SELECTORS, &selectors, false)?
-            {
-                if should_retry_with_body(candidate, &body_candidate) {
-                    best_candidate = Some(body_candidate);
+                    .filter(|body_candidate| should_retry_with_body(&candidate, body_candidate));
+
+            let retry_candidate = match (broad_retry_candidate, body_retry_candidate) {
+                (Some(broad_candidate), Some(body_candidate))
+                    if should_retry_with_body(&broad_candidate, &body_candidate) =>
+                {
+                    Some(body_candidate)
                 }
+                (Some(broad_candidate), _) => Some(broad_candidate),
+                (None, body_candidate) => body_candidate,
+            };
+
+            if let Some(retry_candidate) = retry_candidate {
+                fallback_steps.push("low-word-selector-retry".to_string());
+                best_candidate = Some(retry_candidate);
             }
         }
     }
