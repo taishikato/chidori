@@ -1371,6 +1371,42 @@ fn keeps_mid_article_link_dense_resource_sections() {
 }
 
 #[test]
+fn removes_related_card_sections_even_when_footer_follows() {
+    let html = r##"
+    <body>
+      <section>
+        <h1>Superpowers</h1>
+        <p>Superpowers is a comprehensive skills framework that teaches Claude structured software development methodologies.</p>
+        <p>For debugging, the systematic methodology guides you through root cause investigation and implementation.</p>
+      </section>
+      <section>
+        <h2>Related plugins</h2>
+        <a href="/plugins/frontend-design"><h3>Frontend Design</h3><p>Craft production-grade frontends.</p></a>
+        <a href="/plugins/context7"><h3>Context7</h3><p>Pull live docs into context.</p></a>
+        <a href="/plugins/code-review"><h3>Code Review</h3><p>AI code review for pull requests.</p></a>
+      </section>
+      <section class="prompt_menu">
+        <h2>Write</h2>
+        <p>Please execute the task as soon as you can. Thanks for your help!</p>
+      </section>
+      <div class="footer_links_wrap">
+        <h2>Claude Platform</h2>
+        <a href="/platform/api">Overview</a>
+        <a href="/legal/privacy">Privacy policy</a>
+      </div>
+    </body>"##;
+
+    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+
+    assert!(cleaned.contains("Superpowers is a comprehensive"));
+    assert!(cleaned.contains("Please execute the task as soon as you can"));
+    assert!(!cleaned.contains("Related plugins"));
+    assert!(!cleaned.contains("Frontend Design"));
+    assert!(!cleaned.contains("Claude Platform"));
+    assert!(!cleaned.contains("Privacy policy"));
+}
+
+#[test]
 fn cleaner_treats_non_ascii_less_than_text_as_text() {
     let html =
         "<article><p>Keep this.</p><p>It<’s text, not a tag.</p><p>Use <— as text.</p></article>";

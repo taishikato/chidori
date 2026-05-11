@@ -58,8 +58,26 @@ fn clean_html_inner(html: &str, options: &CleanOptions, remove_hidden: bool) -> 
         "[data-block=\"nav\"], .breadcrumb, .toc",
     );
     cleaned = next;
+    let next = remove_footer_like_blocks(&cleaned);
+    push_removal_if_changed(
+        &mut removals,
+        &cleaned,
+        &next,
+        "footer-like-block",
+        ".footer, [role=\"contentinfo\"]",
+    );
+    cleaned = next;
     let next = remove_fragment_only_link_lists(&cleaned);
     push_removal_if_changed(&mut removals, &cleaned, &next, "fragment-link-list", "ul");
+    cleaned = next;
+    let next = remove_related_card_sections(&cleaned);
+    push_removal_if_changed(
+        &mut removals,
+        &cleaned,
+        &next,
+        "related-card-section",
+        "section, div",
+    );
     cleaned = next;
     let next = remove_link_dense_related_sections(&cleaned);
     push_removal_if_changed(
@@ -144,6 +162,47 @@ fn is_navigation_like_opening_tag(opening_tag: &str) -> bool {
         || has_class_token(opening_tag, "toc-panel")
 }
 
+fn remove_footer_like_blocks(html: &str) -> String {
+    let mut cleaned = html.to_string();
+    for tag in ["div", "section", "header"] {
+        cleaned = remove_matching_tags_where(&cleaned, tag, is_footer_like_opening_tag);
+    }
+    cleaned
+}
+
+fn is_footer_like_opening_tag(opening_tag: &str) -> bool {
+    attribute_value_eq(opening_tag, "role", "contentinfo")
+        || has_class_token(opening_tag, "footer")
+        || has_class_token(opening_tag, "site-footer")
+        || has_class_token(opening_tag, "page-footer")
+        || has_class_token(opening_tag, "global-footer")
+        || class_tokens(opening_tag).any(is_footer_link_class)
+}
+
+fn is_footer_link_class(token: &str) -> bool {
+    matches!(
+        token.to_ascii_lowercase().as_str(),
+        "footer_links_wrap"
+            | "footer-links-wrap"
+            | "footer_links_layout"
+            | "footer-links-layout"
+            | "footer_links_col"
+            | "footer-links-col"
+            | "footer_links_list_wrap"
+            | "footer-links-list-wrap"
+            | "footer_links_list"
+            | "footer-links-list"
+            | "footer_footer"
+            | "footer-footer"
+            | "footer_social_icon_wrap"
+            | "footer-social-icon-wrap"
+            | "footer_anthropic_link"
+            | "footer-anthropic-link"
+            | "footer_copyright"
+            | "footer-copyright"
+    )
+}
+
 fn remove_fragment_only_link_lists(html: &str) -> String {
     remove_matching_tags_by_content(html, "ul", |fragment| {
         let dom = Html::parse_fragment(fragment);
@@ -175,6 +234,72 @@ fn remove_fragment_only_link_lists(html: &str) -> String {
 
         text_len > 0 && (link_text_len as f64 / text_len as f64) > 0.85
     })
+}
+
+fn remove_related_card_sections(html: &str) -> String {
+    let mut cleaned = html.to_string();
+    for tag in ["section", "div"] {
+        cleaned = remove_matching_tags_by_content(&cleaned, tag, is_related_card_section);
+    }
+    cleaned
+}
+
+fn is_related_card_section(fragment: &str) -> bool {
+    let dom = Html::parse_fragment(fragment);
+    let root = dom.root_element();
+    let text = root.text().collect::<Vec<_>>().join(" ");
+    let word_count = text.split_whitespace().count();
+    if word_count == 0 || word_count > 220 {
+        return false;
+    }
+
+    let heading_selector = Selector::parse("h1, h2, h3, h4, h5, h6").unwrap();
+    let has_related_heading = root.select(&heading_selector).any(|heading| {
+        let heading_text = heading.text().collect::<Vec<_>>().join(" ");
+        is_related_heading(&heading_text)
+    });
+    if !has_related_heading {
+        return false;
+    }
+
+    let link_selector = Selector::parse("a").unwrap();
+    let links = root.select(&link_selector).collect::<Vec<_>>();
+    if links.len() < 2 {
+        return false;
+    }
+
+    let link_text_len: usize = links
+        .iter()
+        .map(|link| link.text().collect::<Vec<_>>().join(" ").trim().len())
+        .sum();
+    let text_len = text.trim().len().max(1);
+    let heading_count = root.select(&heading_selector).count();
+    let link_text_ratio = link_text_len as f64 / text_len as f64;
+
+    link_text_ratio > 0.35 || heading_count >= 3
+}
+
+fn is_related_heading(text: &str) -> bool {
+    let normalized = text
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
+
+    matches!(
+        normalized.as_str(),
+        "related plugins"
+            | "related posts"
+            | "related articles"
+            | "related content"
+            | "related stories"
+            | "related reads"
+            | "read next"
+            | "more articles"
+            | "more posts"
+            | "further reading"
+            | "see also"
+    )
 }
 
 fn remove_link_dense_related_sections(html: &str) -> String {
@@ -377,11 +502,11 @@ fn is_dangerous_url(value: &str) -> bool {
 }
 
 fn has_class_token(opening_tag: &str, expected: &str) -> bool {
-    attribute_values(opening_tag, "class").any(|value| {
-        value
-            .split_ascii_whitespace()
-            .any(|token| token.eq_ignore_ascii_case(expected))
-    })
+    class_tokens(opening_tag).any(|token| token.eq_ignore_ascii_case(expected))
+}
+
+fn class_tokens(opening_tag: &str) -> impl Iterator<Item = &str> {
+    attribute_values(opening_tag, "class").flat_map(|value| value.split_ascii_whitespace())
 }
 
 fn has_attribute(opening_tag: &str, expected: &str) -> bool {
