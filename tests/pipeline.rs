@@ -17,6 +17,43 @@ fn fixture_to_markdown(name: &str) -> String {
 }
 
 #[test]
+fn converts_simple_html_tables_to_markdown_tables() {
+    let html =
+        std::fs::read_to_string("tests/fixtures/reference/markdown--simple-table.html").unwrap();
+    let markdown = html_to_markdown(&html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("| Name | Score |"));
+    assert!(markdown.contains("| --- | --- |"));
+    assert!(markdown.contains("| Alpha | 10 |"));
+    assert!(markdown.contains("| Beta | 20 |"));
+}
+
+#[test]
+fn restores_specialized_elements_inside_markdown_table_cells() {
+    let html = r#"<!doctype html>
+    <html>
+      <body>
+        <article>
+          <table>
+            <thead>
+              <tr><th>Formula</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><math data-latex="x|y"></math></td></tr>
+            </tbody>
+          </table>
+        </article>
+      </body>
+    </html>"#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("| Formula |"), "{markdown}");
+    assert!(markdown.contains("| $x\\|y$ |"), "{markdown}");
+    assert!(!markdown.contains("CHIDORISPECIAL"), "{markdown}");
+    assert!(!markdown.contains("CHIDORI_SPECIAL"), "{markdown}");
+}
+
+#[test]
 fn extracts_basic_metadata() {
     let html = r#"<!doctype html>
     <html lang="en">

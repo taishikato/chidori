@@ -317,14 +317,13 @@ impl SpecializedHtml {
         specialized.prefer_largest_srcset_images();
         specialized.replace_math();
         specialized.replace_callouts();
+        specialized.replace_simple_tables();
         specialized.replace_footnotes();
         specialized
     }
 
     fn restore(self, mut markdown: String) -> String {
-        for (placeholder, value) in self.replacements {
-            markdown = markdown.replace(&placeholder, &value);
-        }
+        markdown = restore_replacements(markdown, &self.replacements);
 
         if !self.footnotes.is_empty() {
             markdown.push_str("\n\n---\n\n");
@@ -338,7 +337,7 @@ impl SpecializedHtml {
     }
 
     fn push_replacement(&mut self, value: String) -> String {
-        let placeholder = format!("CHIDORISPECIAL{}", self.replacements.len());
+        let placeholder = format!("CHIDORISPECIALPLACEHOLDER{}END", self.replacements.len());
         self.replacements.push((placeholder.clone(), value));
         placeholder
     }
@@ -453,6 +452,40 @@ impl SpecializedHtml {
         self.html = output;
     }
 
+    fn replace_simple_tables(&mut self) {
+        let source = std::mem::take(&mut self.html);
+        let mut output = String::with_capacity(source.len());
+        let mut rest = source.as_str();
+
+        while let Some(index) = find_opening_tag(rest, "table") {
+            output.push_str(&rest[..index]);
+            let candidate = &rest[index..];
+            let Some(open_end) = opening_tag_end(candidate) else {
+                output.push_str(candidate);
+                self.html = output;
+                return;
+            };
+            let Some(close_end) = find_matching_close(candidate, "table", open_end + 1) else {
+                output.push_str(candidate);
+                self.html = output;
+                return;
+            };
+            let fragment = &candidate[..close_end];
+
+            if let Some(markdown) = simple_table_markdown(fragment, &self.replacements) {
+                let placeholder = self.push_replacement(markdown);
+                output.push_str(&placeholder);
+            } else {
+                output.push_str(fragment);
+            }
+
+            rest = &candidate[close_end..];
+        }
+
+        output.push_str(rest);
+        self.html = output;
+    }
+
     fn replace_footnotes(&mut self) {
         self.html = replace_footnote_refs(&self.html);
         let source = std::mem::take(&mut self.html);
@@ -486,6 +519,103 @@ impl SpecializedHtml {
         output.push_str(rest);
         self.html = output;
     }
+}
+
+fn restore_replacements(mut markdown: String, replacements: &[(String, String)]) -> String {
+    if replacements.is_empty() {
+        return markdown;
+    }
+
+    for _ in 0..=replacements.len() {
+        let before = markdown.clone();
+        for (placeholder, value) in replacements {
+            markdown = markdown.replace(placeholder, value);
+        }
+        if markdown == before {
+            break;
+        }
+    }
+
+    markdown
+}
+
+struct MarkdownTableCell {
+    text: String,
+    is_header: bool,
+}
+
+fn simple_table_markdown(fragment: &str, replacements: &[(String, String)]) -> Option<String> {
+    let dom = Html::parse_fragment(fragment);
+    let table_selector = Selector::parse("table").unwrap();
+    let row_selector = Selector::parse("tr").unwrap();
+    let cell_selector = Selector::parse("th, td").unwrap();
+    let table = dom.select(&table_selector).next()?;
+
+    if table.inner_html().to_ascii_lowercase().contains("<table") {
+        return None;
+    }
+
+    let rows = table
+        .select(&row_selector)
+        .map(|row| {
+            row.select(&cell_selector)
+                .map(|cell| {
+                    if cell.value().attr("colspan").is_some()
+                        || cell.value().attr("rowspan").is_some()
+                    {
+                        return None;
+                    }
+
+                    Some(MarkdownTableCell {
+                        text: markdown_table_cell_text(cell, replacements),
+                        is_header: cell.value().name().eq_ignore_ascii_case("th"),
+                    })
+                })
+                .collect::<Option<Vec<_>>>()
+        })
+        .collect::<Option<Vec<_>>>()?
+        .into_iter()
+        .filter(|row| !row.is_empty())
+        .collect::<Vec<_>>();
+
+    let (header, body_rows) = rows.split_first()?;
+    if body_rows.is_empty() || !header.iter().any(|cell| cell.is_header) {
+        return None;
+    }
+
+    let width = header.len();
+    if body_rows.iter().any(|row| row.len() != width) {
+        return None;
+    }
+
+    let mut output = Vec::with_capacity(body_rows.len() + 2);
+    output.push(markdown_table_row(
+        header.iter().map(|cell| cell.text.as_str()),
+    ));
+    output.push(markdown_table_row(std::iter::repeat_n("---", width)));
+    for row in body_rows {
+        output.push(markdown_table_row(
+            row.iter().map(|cell| cell.text.as_str()),
+        ));
+    }
+
+    Some(format!("\n{}\n", output.join("\n")))
+}
+
+fn markdown_table_cell_text(cell: ElementRef<'_>, replacements: &[(String, String)]) -> String {
+    let text = cell
+        .text()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    restore_replacements(text, replacements).replace('|', "\\|")
+}
+
+fn markdown_table_row<'a>(cells: impl IntoIterator<Item = &'a str>) -> String {
+    format!("| {} |", cells.into_iter().collect::<Vec<_>>().join(" | "))
 }
 
 fn callout_markdown(fragment: &str, kind: &str) -> String {
@@ -888,6 +1018,20 @@ fn opening_tag_end(input: &str) -> Option<usize> {
             None if character == '>' => return Some(index),
             None => {}
         }
+    }
+
+    None
+}
+
+fn find_opening_tag(input: &str, tag: &str) -> Option<usize> {
+    let mut offset = 0;
+
+    while let Some(index) = input[offset..].find('<') {
+        let start = offset + index;
+        if tag_name_matches(&input[start + '<'.len_utf8()..], tag) {
+            return Some(start);
+        }
+        offset = start + '<'.len_utf8();
     }
 
     None
