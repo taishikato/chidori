@@ -492,7 +492,17 @@ impl SpecializedHtml {
         let mut output = String::with_capacity(source.len());
         let mut rest = source.as_str();
 
-        while let Some(index) = rest.find("<section") {
+        loop {
+            let next_section = find_opening_tag(rest, "section").map(|index| (index, "section"));
+            let next_ordered_list = find_opening_tag(rest, "ol").map(|index| (index, "ol"));
+            let Some((index, tag)) = [next_section, next_ordered_list]
+                .into_iter()
+                .flatten()
+                .min_by_key(|(index, _)| *index)
+            else {
+                break;
+            };
+
             output.push_str(&rest[..index]);
             let candidate = &rest[index..];
             let Some(open_end) = candidate.find('>') else {
@@ -501,12 +511,21 @@ impl SpecializedHtml {
                 return;
             };
             let opening_tag = &candidate[..=open_end];
-            if attr_value(opening_tag, "id").as_deref() != Some("footnotes") {
-                output.push_str("<section");
-                rest = &candidate["<section".len()..];
+            let is_standard_footnotes = attr_value(opening_tag, "id").as_deref()
+                == Some("footnotes")
+                || attr_value(opening_tag, "class")
+                    .as_deref()
+                    .is_some_and(|classes| {
+                        classes
+                            .split_whitespace()
+                            .any(|class| class == "wp-block-footnotes")
+                    });
+            if !is_standard_footnotes {
+                output.push_str(&candidate[..open_end + 1]);
+                rest = &candidate[open_end + 1..];
                 continue;
             }
-            let Some(close_end) = find_matching_close(candidate, "section", open_end + 1) else {
+            let Some(close_end) = find_matching_close(candidate, tag, open_end + 1) else {
                 output.push_str(candidate);
                 self.html = output;
                 return;
@@ -671,7 +690,9 @@ fn replace_footnote_refs(html: &str) -> String {
         let content_end = content_start + close_start;
         let inner_html = &candidate[content_start..content_end];
         let after = content_end + "</sup>".len();
-        if let Some(id) = footnote_id(opening_tag).or_else(|| footnote_id(inner_html)) {
+        if let Some(id) =
+            footnote_id_from_opening_tag(opening_tag).or_else(|| footnote_id_from_html(inner_html))
+        {
             output.push_str(&format!("[^{id}]"));
         } else {
             output.push_str(&candidate[..after]);
@@ -701,20 +722,42 @@ fn footnotes_from_section(fragment: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-fn footnote_id(value: &str) -> Option<String> {
-    for needle in ["#fn-", "#footnote-", "fnref-", "footnote-ref-"] {
-        if let Some(start) = value.find(needle) {
-            let id_start = start + needle.len();
-            let id = value[id_start..]
-                .chars()
-                .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '-' || *ch == '_')
-                .collect::<String>();
-            if !id.is_empty() {
-                return Some(id);
-            }
+fn footnote_id_from_html(html: &str) -> Option<String> {
+    let mut rest = html;
+
+    while let Some(index) = rest.find('<') {
+        let candidate = &rest[index..];
+        let open_end = opening_tag_end(candidate)?;
+        if let Some(id) = footnote_id_from_opening_tag(&candidate[..=open_end]) {
+            return Some(id);
         }
+        rest = &candidate[open_end + 1..];
     }
     None
+}
+
+fn footnote_id_from_opening_tag(opening_tag: &str) -> Option<String> {
+    ["href", "id"].into_iter().find_map(|name| {
+        attr_value(opening_tag, name).and_then(|value| footnote_id_from_attr_value(&value))
+    })
+}
+
+fn footnote_id_from_attr_value(value: &str) -> Option<String> {
+    ["#fn-", "#footnote-", "fnref-", "footnote-ref-", "fn-"]
+        .into_iter()
+        .find_map(|prefix| {
+            value
+                .strip_prefix(prefix)
+                .map(footnote_id_suffix)
+                .filter(|id| !id.is_empty())
+        })
+}
+
+fn footnote_id_suffix(value: &str) -> String {
+    value
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '-' || *ch == '_')
+        .collect()
 }
 
 fn normalize_setext_headings(markdown: &str) -> String {

@@ -1452,6 +1452,35 @@ fn converts_footnotes_to_markdown_references() {
 }
 
 #[test]
+fn converts_wordpress_block_footnotes_to_markdown_references() {
+    let html = std::fs::read_to_string("tests/fixtures/reference/footnotes--wordpress-block.html")
+        .unwrap();
+    let markdown = html_to_markdown(&html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("note[^1]."));
+    assert!(markdown.contains("[^1]: WordPress block footnote text."));
+    assert!(!markdown.contains("↩"));
+}
+
+#[test]
+fn ignores_non_footnotes_with_fn_like_attribute_values() {
+    let html = r##"
+    <article>
+      <p>
+        Inline label<sup class="fn-label">x</sup>
+        and anchor<sup><a href="#not-fn-1">not a footnote</a></sup>.
+      </p>
+    </article>"##;
+
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(!markdown.contains("[^label]"));
+    assert!(!markdown.contains("[^1]"));
+    assert!(markdown.contains("x"));
+    assert!(markdown.contains("#not-fn-1"));
+}
+
+#[test]
 fn removes_hidden_and_embedded_noise_elements() {
     let html = r#"
     <article>
