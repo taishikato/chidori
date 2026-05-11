@@ -263,11 +263,25 @@ async function runCase(testCase, baseUrl) {
   };
 }
 
-function renderMarkdown(report) {
+function metadataGapFields(result) {
+  const fields = [];
+  for (const field of ['author', 'published']) {
+    if ((result.metadata?.chidori?.[field] ?? '') === '' && (result.metadata?.reference?.[field] ?? '') !== '') {
+      fields.push(field);
+    }
+  }
+  return fields;
+}
+
+function metadataGaps(report) {
+  return report.results
+    .map((result) => ({ result, fields: metadataGapFields(result) }))
+    .filter(({ fields }) => fields.length > 0);
+}
+
+export function renderMarkdown(report) {
   const lines = [
     '# Extraction Parity Report',
-    '',
-    `Generated: ${report.generatedAt}`,
     '',
     `Curated cases: ${report.summary.total}`,
     `Parity or better: ${report.summary.parityOrBetter}`,
@@ -305,7 +319,31 @@ function renderMarkdown(report) {
     }
   }
 
+  const gaps = metadataGaps(report);
+  if (gaps.length > 0) {
+    lines.push('', '## Known Limitations', '');
+    for (const { result, fields } of gaps) {
+      lines.push(`- ${result.id}: missing metadata fields (${fields.join(', ')}) compared with the reference output.`);
+    }
+  }
+
   return `${lines.join('\n')}\n`;
+}
+
+export function buildReport(results) {
+  const summary = {
+    total: results.length,
+    parityOrBetter: results.filter((result) => result.status === 'parity-or-better').length,
+    chidoriBetter: results.filter((result) => result.status === 'chidori-better').length,
+    chidoriWorse: results.filter((result) => result.status === 'chidori-worse').length,
+    humanReview: results.filter((result) => result.status === 'human-review').length,
+    toolErrors: results.filter((result) => result.status.endsWith('-error')).length,
+  };
+  return {
+    corpus: basename(corpusPath),
+    summary,
+    results,
+  };
 }
 
 async function main() {
@@ -320,20 +358,7 @@ async function main() {
     return caseResults;
   });
 
-  const summary = {
-    total: results.length,
-    parityOrBetter: results.filter((result) => result.status === 'parity-or-better').length,
-    chidoriBetter: results.filter((result) => result.status === 'chidori-better').length,
-    chidoriWorse: results.filter((result) => result.status === 'chidori-worse').length,
-    humanReview: results.filter((result) => result.status === 'human-review').length,
-    toolErrors: results.filter((result) => result.status.endsWith('-error')).length,
-  };
-  const report = {
-    generatedAt: new Date().toISOString(),
-    corpus: basename(corpusPath),
-    summary,
-    results,
-  };
+  const report = buildReport(results);
 
   if (options.updateReport) {
     await mkdir(reportDir, { recursive: true });
@@ -342,12 +367,14 @@ async function main() {
   }
 
   console.log(renderMarkdown(report));
-  if (summary.chidoriWorse > 0 || summary.toolErrors > 0) {
+  if (report.summary.chidoriWorse > 0 || report.summary.toolErrors > 0) {
     process.exitCode = 1;
   }
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : error);
-  process.exit(1);
-});
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exit(1);
+  });
+}

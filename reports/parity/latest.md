@@ -1,7 +1,5 @@
 # Extraction Parity Report
 
-Generated: 2026-05-11T08:43:31.499Z
-
 Curated cases: 24
 Parity or better: 9
 Chidori better: 15
@@ -70,3 +68,8 @@ Tool errors: 0
 ## Open Items
 
 No unexplained chidori-worse-than-reference cases remain in the curated corpus.
+
+## Known Limitations
+
+- daringfireball-iphone-16e: missing metadata fields (author, published) compared with the reference output.
+- obsidian-sync-encryption: missing metadata fields (author, published) compared with the reference output.

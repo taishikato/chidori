@@ -317,7 +317,7 @@ fn known_site_content_candidate(
         return Ok(None);
     };
     if let Some(site) = social_thread_site(doc, host) {
-        if let Some(html) = social_thread_candidate(content, site)? {
+        if let Some(html) = social_thread_candidate(content, site, doc.url.path())? {
             return Ok(Some((content_selector.to_string(), html)));
         }
     }
@@ -367,6 +367,7 @@ fn social_thread_site(doc: &ParsedDocument, host: &str) -> Option<SocialThreadSi
 fn social_thread_candidate(
     root: ElementRef<'_>,
     site: SocialThreadSite,
+    target_path: &str,
 ) -> Result<Option<String>, ChidoriError> {
     let article_selector =
         Selector::parse("article").map_err(|error| ChidoriError::Unknown(error.to_string()))?;
@@ -384,12 +385,36 @@ fn social_thread_candidate(
         .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
     let threads_profile_link_selector = Selector::parse(r#"a[href^="/@"]"#)
         .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let permalink_selector =
+        Selector::parse(r#"a[href]"#).map_err(|error| ChidoriError::Unknown(error.to_string()))?;
 
     let mut output = String::from("<article class=\"chidori-social-thread\">");
     let mut post_count = 0;
-    for article in root
+    let articles = root
         .select(&article_selector)
         .filter(|article| nearest_social_article_parent(*article, &article_selector).is_none())
+        .collect::<Vec<_>>();
+    let start_index = articles.iter().position(|article| {
+        article_matches_target_permalink(*article, &permalink_selector, target_path)
+    });
+
+    for article in articles
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, article)| {
+            if let Some(start_index) = start_index {
+                (index >= start_index
+                    && !article_has_other_post_permalink(
+                        article,
+                        site,
+                        &permalink_selector,
+                        target_path,
+                    ))
+                .then_some(article)
+            } else {
+                Some(article)
+            }
+        })
     {
         let Some(body) = social_thread_body(
             article,
@@ -463,6 +488,54 @@ fn social_thread_candidate(
     } else {
         Ok(Some(output))
     }
+}
+
+fn article_matches_target_permalink(
+    article: ElementRef<'_>,
+    permalink_selector: &Selector,
+    target_path: &str,
+) -> bool {
+    article.select(permalink_selector).any(|link| {
+        link.value()
+            .attr("href")
+            .is_some_and(|href| href_path_matches_target(href, target_path))
+    })
+}
+
+fn article_has_other_post_permalink(
+    article: ElementRef<'_>,
+    site: SocialThreadSite,
+    permalink_selector: &Selector,
+    target_path: &str,
+) -> bool {
+    article.select(permalink_selector).any(|link| {
+        link.value().attr("href").is_some_and(|href| {
+            href_looks_like_social_post(href, site) && !href_path_matches_target(href, target_path)
+        })
+    })
+}
+
+fn href_path_matches_target(href: &str, target_path: &str) -> bool {
+    normalize_href_path(href) == target_path.trim_end_matches('/')
+}
+
+fn href_looks_like_social_post(href: &str, site: SocialThreadSite) -> bool {
+    let path = normalize_href_path(href);
+    match site {
+        SocialThreadSite::Bluesky => path.contains("/profile/") && path.contains("/post/"),
+        SocialThreadSite::Threads => path.starts_with("/@") && path.contains("/post/"),
+    }
+}
+
+fn normalize_href_path(href: &str) -> String {
+    if let Ok(url) = url::Url::parse(href) {
+        return url.path().trim_end_matches('/').to_string();
+    }
+    href.split(['?', '#'])
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches('/')
+        .to_string()
 }
 
 fn social_thread_body<'a>(

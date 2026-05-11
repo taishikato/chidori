@@ -317,8 +317,8 @@ impl SpecializedHtml {
         specialized.prefer_largest_srcset_images();
         specialized.replace_math();
         specialized.replace_callouts();
-        specialized.replace_simple_tables();
         specialized.replace_footnotes();
+        specialized.replace_simple_tables();
         specialized
     }
 

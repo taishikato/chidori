@@ -458,15 +458,25 @@ fn strip_byline_prefix(value: &str) -> &str {
 fn trim_trailing_byline_noise(value: &str) -> &str {
     let lower = value.to_ascii_lowercase();
     let mut end = value.len();
-    for marker in [
-        " published ",
-        " updated ",
-        " posted ",
-        " follow",
-        " subscribe",
-    ] {
+    for marker in [" published ", " updated ", " posted "] {
         if let Some(index) = lower.find(marker) {
             end = end.min(index);
+        }
+    }
+    for marker in [" follow", " subscribe"] {
+        let mut offset = 0;
+        while let Some(index) = lower[offset..].find(marker) {
+            let start = offset + index;
+            let after = start + marker.len();
+            if lower[after..]
+                .chars()
+                .next()
+                .is_none_or(|ch| !ch.is_alphabetic())
+            {
+                end = end.min(start);
+                break;
+            }
+            offset = after;
         }
     }
     value[..end].trim()

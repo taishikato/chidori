@@ -75,6 +75,34 @@ fn restores_specialized_elements_inside_markdown_table_cells() {
 }
 
 #[test]
+fn converts_footnote_refs_inside_markdown_table_cells() {
+    let html = r##"
+    <article>
+      <table>
+        <thead>
+          <tr><th>Claim</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Documented claim<sup><a href="#fn-1">1</a></sup></td></tr>
+        </tbody>
+      </table>
+      <section id="footnotes">
+        <ol>
+          <li id="fn-1">Table footnote text. <a href="#fnref-1">↩</a></li>
+        </ol>
+      </section>
+    </article>"##;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("| Documented claim[^1] |"), "{markdown}");
+    assert!(
+        markdown.contains("[^1]: Table footnote text."),
+        "{markdown}"
+    );
+    assert!(!markdown.contains("#fn-1"), "{markdown}");
+}
+
+#[test]
 fn named_footnote_refs_match_named_definitions() {
     let html = r##"
     <article>
@@ -270,6 +298,50 @@ fn threads_body_uses_nested_post_text_instead_of_profile_wrapper() {
 }
 
 #[test]
+fn threads_thread_starts_at_requested_permalink() {
+    let html = r#"<!doctype html>
+    <html><body>
+      <main>
+        <article>
+          <header>
+            <a href="/@bob">bob</a>
+            <a href="/@bob/post/other"><time datetime="2026-05-08T14:00:00Z">May 8</time></a>
+          </header>
+          <div>Recommended post should not become the root.</div>
+        </article>
+        <article>
+          <header>
+            <a href="/@alice">alice</a>
+            <a href="https://www.threads.net/@alice/post/abc123"><time datetime="2026-05-08T15:04:00Z">May 8</time></a>
+          </header>
+          <div>Requested post text stays primary.</div>
+        </article>
+        <article>
+          <header>
+            <a href="/@reader">reader</a>
+          </header>
+          <div>This reply gives useful context.</div>
+        </article>
+      </main>
+    </body></html>"#;
+    let doc = ParsedDocument::parse(
+        html,
+        Url::parse("https://www.threads.net/@alice/post/abc123").unwrap(),
+    );
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(
+        main.contains("Requested post text stays primary."),
+        "{main}"
+    );
+    assert!(main.contains("This reply gives useful context."), "{main}");
+    assert!(
+        !main.contains("Recommended post should not become the root."),
+        "{main}"
+    );
+}
+
+#[test]
 fn extracts_canonical_meta_tags_and_richer_article_metadata() {
     let html = r#"<!doctype html>
     <html lang="en">
@@ -398,6 +470,24 @@ fn dom_byline_strips_trailing_published_and_follow_text() {
     let metadata = extract_metadata(&doc);
 
     assert_eq!(metadata.author, "Ada Lovelace");
+}
+
+#[test]
+fn dom_byline_keeps_follow_or_subscribe_inside_author_names() {
+    let html = r#"<!doctype html>
+    <html>
+      <body>
+        <article>
+          <h1>Article Title</h1>
+          <p class="byline">By Ada Followshaw Subscribe</p>
+          <p>Hello world.</p>
+        </article>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.author, "Ada Followshaw");
 }
 
 #[test]
