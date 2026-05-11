@@ -249,6 +249,8 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
         content_score: extraction.content_score,
         retry_class,
         removals: extraction.removals.clone(),
+        candidates: extraction.diagnostics.candidates.clone(),
+        fallback_attempts: extraction.diagnostics.fallback_attempts.clone(),
         timings: crate::output::DebugTimings {
             total_ms: started.elapsed().as_millis(),
         },
@@ -617,6 +619,7 @@ struct ExtractionResult {
     removals: Vec<crate::cleaner::RemovalRecord>,
     fallbacks: Vec<String>,
     content_title: Option<String>,
+    diagnostics: crate::extractor::ExtractionDiagnostics,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -638,68 +641,75 @@ fn extract_markdown_from_doc(
     doc: &crate::document::ParsedDocument,
     config: &RunConfig,
 ) -> Result<ExtractionResult, ChidoriError> {
-    let (markdown, path, content_selector, content_score, removals, fallbacks, content_title) =
-        if let Some(raw_markdown) = crate::markdown::extract_raw_markdown(&doc.html) {
-            let raw_markdown = if config.no_images {
-                crate::markdown::remove_markdown_images(&raw_markdown)
-            } else {
-                raw_markdown
-            };
-            let markdown = if let Some(max_chars) = config.max_chars {
-                raw_markdown.chars().take(max_chars).collect()
-            } else {
-                raw_markdown
-            };
-            let content_title = first_markdown_heading(&markdown);
-            (
-                markdown,
-                ExtractionPath::RawMarkdown,
-                None,
-                None,
-                Vec::new(),
-                Vec::new(),
-                content_title,
-            )
+    let (
+        markdown,
+        path,
+        content_selector,
+        content_score,
+        removals,
+        fallbacks,
+        content_title,
+        diagnostics,
+    ) = if let Some(raw_markdown) = crate::markdown::extract_raw_markdown(&doc.html) {
+        let raw_markdown = if config.no_images {
+            crate::markdown::remove_markdown_images(&raw_markdown)
         } else {
-            let content = crate::extractor::extract_main_content(doc)?;
-            let clean_options = crate::cleaner::CleanOptions {
-                no_images: config.no_images,
-            };
-            let cleaned = if content
-                .fallbacks
-                .iter()
-                .any(|fallback| fallback == "hidden-content")
-            {
-                crate::cleaner::clean_html_preserving_hidden_with_report(
-                    &content.html,
-                    &clean_options,
-                )
-            } else {
-                crate::cleaner::clean_html_with_report(&content.html, &clean_options)
-            };
-            let markdown = crate::markdown::html_to_markdown(
-                &cleaned.html,
-                &crate::markdown::MarkdownOptions {
-                    max_chars: config.max_chars,
-                },
-            );
-            let content_title = crate::metadata::title_from_html_fragment(&cleaned.html);
-            if content.score.is_some()
-                && is_too_link_dense(&cleaned.html)
-                && !is_readable_link_dense_content(&cleaned.html)
-            {
-                return Err(ChidoriError::ExtractionFailed);
-            }
-            (
-                markdown,
-                ExtractionPath::Html,
-                content.selector,
-                content.score,
-                cleaned.removals,
-                content.fallbacks,
-                content_title,
-            )
+            raw_markdown
         };
+        let markdown = if let Some(max_chars) = config.max_chars {
+            raw_markdown.chars().take(max_chars).collect()
+        } else {
+            raw_markdown
+        };
+        let content_title = first_markdown_heading(&markdown);
+        (
+            markdown,
+            ExtractionPath::RawMarkdown,
+            None,
+            None,
+            Vec::new(),
+            Vec::new(),
+            content_title,
+            crate::extractor::ExtractionDiagnostics::default(),
+        )
+    } else {
+        let content = crate::extractor::extract_main_content(doc)?;
+        let clean_options = crate::cleaner::CleanOptions {
+            no_images: config.no_images,
+        };
+        let cleaned = if content
+            .fallbacks
+            .iter()
+            .any(|fallback| fallback == "hidden-content")
+        {
+            crate::cleaner::clean_html_preserving_hidden_with_report(&content.html, &clean_options)
+        } else {
+            crate::cleaner::clean_html_with_report(&content.html, &clean_options)
+        };
+        let markdown = crate::markdown::html_to_markdown(
+            &cleaned.html,
+            &crate::markdown::MarkdownOptions {
+                max_chars: config.max_chars,
+            },
+        );
+        let content_title = crate::metadata::title_from_html_fragment(&cleaned.html);
+        if content.score.is_some()
+            && is_too_link_dense(&cleaned.html)
+            && !is_readable_link_dense_content(&cleaned.html)
+        {
+            return Err(ChidoriError::ExtractionFailed);
+        }
+        (
+            markdown,
+            ExtractionPath::Html,
+            content.selector,
+            content.score,
+            cleaned.removals,
+            content.fallbacks,
+            content_title,
+            content.diagnostics,
+        )
+    };
 
     if markdown.trim().is_empty() || is_low_information_spa_shell(doc, &markdown) {
         Err(ChidoriError::ExtractionFailed)
@@ -712,6 +722,7 @@ fn extract_markdown_from_doc(
             removals,
             fallbacks,
             content_title,
+            diagnostics,
         })
     }
 }

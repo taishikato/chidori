@@ -52,6 +52,40 @@ pub struct ExtractedContent {
     pub selector: Option<String>,
     pub score: Option<isize>,
     pub fallbacks: Vec<String>,
+    pub diagnostics: ExtractionDiagnostics,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContentCandidateDiagnostic {
+    pub selector: String,
+    pub score: isize,
+    pub word_count: usize,
+    pub content_block_count: usize,
+    pub decision: CandidateDecision,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CandidateDecision {
+    Selected,
+    Rejected,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FallbackAttemptDiagnostic {
+    pub name: String,
+    pub accepted: bool,
+    pub previous_word_count: usize,
+    pub candidate_word_count: usize,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ExtractionDiagnostics {
+    pub candidates: Vec<ContentCandidateDiagnostic>,
+    pub fallback_attempts: Vec<FallbackAttemptDiagnostic>,
 }
 
 struct ScoringSelectors {
@@ -102,12 +136,21 @@ pub fn extract_main_html(doc: &ParsedDocument) -> Result<String, ChidoriError> {
 }
 
 pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, ChidoriError> {
+    let mut diagnostics = ExtractionDiagnostics::default();
+    extract_main_content_inner(doc, &mut diagnostics)
+}
+
+fn extract_main_content_inner(
+    doc: &ParsedDocument,
+    diagnostics: &mut ExtractionDiagnostics,
+) -> Result<ExtractedContent, ChidoriError> {
     if let Some(html) = youtube_watch_candidate(doc)? {
         return Ok(ExtractedContent {
             html,
             selector: Some("youtube-watch".to_string()),
             score: None,
             fallbacks: Vec::new(),
+            diagnostics: diagnostics.clone(),
         });
     }
 
@@ -117,6 +160,7 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
             selector: Some("microblog-status-thread".to_string()),
             score: None,
             fallbacks: Vec::new(),
+            diagnostics: diagnostics.clone(),
         });
     }
 
@@ -126,6 +170,7 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
             selector: Some("mastodon-status-thread".to_string()),
             score: None,
             fallbacks: Vec::new(),
+            diagnostics: diagnostics.clone(),
         });
     }
 
@@ -135,6 +180,7 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
             selector: Some("repository-discussion".to_string()),
             score: None,
             fallbacks: Vec::new(),
+            diagnostics: diagnostics.clone(),
         });
     }
 
@@ -144,6 +190,7 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
             selector: Some("ai-conversation".to_string()),
             score: None,
             fallbacks: Vec::new(),
+            diagnostics: diagnostics.clone(),
         });
     }
 
@@ -153,6 +200,7 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
             selector: Some(selector),
             score: None,
             fallbacks: Vec::new(),
+            diagnostics: diagnostics.clone(),
         });
     }
 
@@ -162,6 +210,7 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
             selector: Some("hacker-news-listing".to_string()),
             score: None,
             fallbacks: Vec::new(),
+            diagnostics: diagnostics.clone(),
         });
     }
 
@@ -171,6 +220,7 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
             selector: Some("reddit-discussion".to_string()),
             score: None,
             fallbacks: Vec::new(),
+            diagnostics: diagnostics.clone(),
         });
     }
 
@@ -186,22 +236,42 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
     };
 
     let mut fallback_steps = Vec::new();
-    let mut best_candidate =
+    let mut candidate_diagnostics = Vec::new();
+    let (mut best_candidate, primary_candidates) =
         best_candidate_for_selectors(doc, PRIMARY_ENTRY_SELECTORS, &selectors, false)?;
+    candidate_diagnostics.push(primary_candidates);
 
     if best_candidate
         .as_ref()
         .is_none_or(|candidate| candidate.word_count < LOW_WORD_COUNT_RETRY_THRESHOLD)
     {
-        if let Some(hidden_candidate) =
-            best_candidate_for_selectors(doc, PRIMARY_ENTRY_SELECTORS, &selectors, true)?
-        {
+        let (hidden_candidate, hidden_candidates) =
+            best_candidate_for_selectors(doc, PRIMARY_ENTRY_SELECTORS, &selectors, true)?;
+        candidate_diagnostics.push(hidden_candidates);
+        if let Some(hidden_candidate) = hidden_candidate {
+            let previous_word_count = best_candidate
+                .as_ref()
+                .map_or(0, |candidate| candidate.word_count);
+            let hidden_word_count = hidden_candidate.word_count;
             let use_hidden = best_candidate
                 .as_ref()
                 .is_none_or(|candidate| should_retry_with_body(candidate, &hidden_candidate));
             if use_hidden {
                 best_candidate = Some(hidden_candidate);
             }
+            diagnostics
+                .fallback_attempts
+                .push(FallbackAttemptDiagnostic {
+                    name: "hidden-content".to_string(),
+                    accepted: use_hidden,
+                    previous_word_count,
+                    candidate_word_count: hidden_word_count,
+                    reason: if use_hidden {
+                        "hidden candidate was more complete".to_string()
+                    } else {
+                        "hidden candidate did not improve enough".to_string()
+                    },
+                });
             if use_hidden {
                 fallback_steps.push("hidden-content".to_string());
             }
@@ -209,14 +279,25 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
     }
 
     if best_candidate.is_none() {
-        best_candidate =
+        let (body_candidate, body_candidates) =
             best_candidate_for_selectors(doc, BODY_FALLBACK_SELECTORS, &selectors, false)?;
+        candidate_diagnostics.push(body_candidates);
+        best_candidate = body_candidate;
     }
 
     let mut used_structured_content = false;
     if let Some(candidate) = best_candidate.as_ref() {
         if let Some(html) = structured_content_candidate(doc, candidate.word_count)? {
             used_structured_content = true;
+            diagnostics
+                .fallback_attempts
+                .push(FallbackAttemptDiagnostic {
+                    name: "schema-org".to_string(),
+                    accepted: true,
+                    previous_word_count: candidate.word_count,
+                    candidate_word_count: text_word_count(&html),
+                    reason: "structured content was more complete".to_string(),
+                });
             best_candidate = Some(Candidate {
                 score: candidate.score,
                 selector_index: candidate.selector_index,
@@ -234,12 +315,16 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
             .filter(|candidate| candidate.word_count < LOW_WORD_COUNT_RETRY_THRESHOLD)
             .cloned()
         {
-            let broad_retry_candidate =
-                best_candidate_for_selectors(doc, BROAD_RETRY_SELECTORS, &selectors, false)?
-                    .filter(|broad_candidate| should_retry_with_body(&candidate, broad_candidate));
-            let body_retry_candidate =
-                best_candidate_for_selectors(doc, BODY_FALLBACK_SELECTORS, &selectors, false)?
-                    .filter(|body_candidate| should_retry_with_body(&candidate, body_candidate));
+            let (broad_retry_candidate, broad_candidates) =
+                best_candidate_for_selectors(doc, BROAD_RETRY_SELECTORS, &selectors, false)?;
+            candidate_diagnostics.push(broad_candidates);
+            let broad_retry_candidate = broad_retry_candidate
+                .filter(|broad_candidate| should_retry_with_body(&candidate, broad_candidate));
+            let (body_retry_candidate, body_candidates) =
+                best_candidate_for_selectors(doc, BODY_FALLBACK_SELECTORS, &selectors, false)?;
+            candidate_diagnostics.push(body_candidates);
+            let body_retry_candidate = body_retry_candidate
+                .filter(|body_candidate| should_retry_with_body(&candidate, body_candidate));
 
             let retry_candidate = match (broad_retry_candidate, body_retry_candidate) {
                 (Some(broad_candidate), Some(body_candidate))
@@ -251,6 +336,21 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
                 (None, body_candidate) => body_candidate,
             };
 
+            diagnostics
+                .fallback_attempts
+                .push(FallbackAttemptDiagnostic {
+                    name: "low-word-selector-retry".to_string(),
+                    accepted: retry_candidate.is_some(),
+                    previous_word_count: candidate.word_count,
+                    candidate_word_count: retry_candidate
+                        .as_ref()
+                        .map_or(0, |candidate| candidate.word_count),
+                    reason: if retry_candidate.is_some() {
+                        "retry candidate had enough additional text".to_string()
+                    } else {
+                        "retry candidates did not improve enough".to_string()
+                    },
+                });
             if let Some(retry_candidate) = retry_candidate {
                 fallback_steps.push("low-word-selector-retry".to_string());
                 best_candidate = Some(retry_candidate);
@@ -259,20 +359,38 @@ pub fn extract_main_content(doc: &ParsedDocument) -> Result<ExtractedContent, Ch
     }
 
     if let Some(candidate) = best_candidate {
+        push_candidate_diagnostics(
+            diagnostics,
+            &candidate_diagnostics,
+            Some(candidate.selector.as_str()),
+        );
         Ok(ExtractedContent {
             html: candidate.html,
             selector: Some(candidate.selector),
             score: Some(candidate.score),
             fallbacks: fallback_steps,
+            diagnostics: diagnostics.clone(),
         })
     } else if let Some(html) = structured_content_candidate(doc, 0)? {
+        diagnostics
+            .fallback_attempts
+            .push(FallbackAttemptDiagnostic {
+                name: "schema-org".to_string(),
+                accepted: true,
+                previous_word_count: 0,
+                candidate_word_count: text_word_count(&html),
+                reason: "structured content was available without a visible candidate".to_string(),
+            });
+        push_candidate_diagnostics(diagnostics, &candidate_diagnostics, None);
         Ok(ExtractedContent {
             html,
             selector: Some("schema-org".to_string()),
             score: None,
             fallbacks: vec!["schema-org".to_string()],
+            diagnostics: diagnostics.clone(),
         })
     } else {
+        push_candidate_diagnostics(diagnostics, &candidate_diagnostics, None);
         Err(ChidoriError::ExtractionFailed)
     }
 }
@@ -1791,8 +1909,9 @@ fn best_candidate_for_selectors(
     raw_selectors: &[&str],
     selectors: &ScoringSelectors,
     include_hidden: bool,
-) -> Result<Option<Candidate>, ChidoriError> {
+) -> Result<(Option<Candidate>, Vec<Candidate>), ChidoriError> {
     let mut best_candidate: Option<Candidate> = None;
+    let mut candidates = Vec::new();
 
     for (selector_index, raw_selector) in raw_selectors.iter().enumerate() {
         let selector = Selector::parse(raw_selector)
@@ -1820,12 +1939,33 @@ fn best_candidate_for_selectors(
                         && candidate.selector_index == best_candidate.selector_index
                         && candidate.word_count > best_candidate.word_count)
             }) {
-                best_candidate = Some(candidate);
+                best_candidate = Some(candidate.clone());
             }
+            candidates.push(candidate);
         }
     }
 
-    Ok(best_candidate)
+    Ok((best_candidate, candidates))
+}
+
+fn push_candidate_diagnostics(
+    diagnostics: &mut ExtractionDiagnostics,
+    candidate_sets: &[Vec<Candidate>],
+    selected_selector: Option<&str>,
+) {
+    for candidate in candidate_sets.iter().flatten() {
+        diagnostics.candidates.push(ContentCandidateDiagnostic {
+            selector: candidate.selector.clone(),
+            score: candidate.score,
+            word_count: candidate.word_count,
+            content_block_count: candidate.content_block_count,
+            decision: if Some(candidate.selector.as_str()) == selected_selector {
+                CandidateDecision::Selected
+            } else {
+                CandidateDecision::Rejected
+            },
+        });
+    }
 }
 
 #[cfg(test)]

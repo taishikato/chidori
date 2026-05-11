@@ -1606,6 +1606,56 @@ async fn json_debug_includes_selected_content_candidate_details() {
 }
 
 #[tokio::test]
+async fn json_debug_includes_candidate_list_and_fallback_attempts() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/debug-candidates"))
+        .respond_with(html_response(
+            r#"
+            <html><body>
+              <article><h1>Stub</h1><p>Stub.</p></article>
+              <main>
+                <h1>Recovered Debug Article</h1>
+                <p>This real article body has enough words to trigger a useful retry.</p>
+                <p>The fallback candidate should be visible in debug JSON.</p>
+                <p>The rejected article candidate should also be visible.</p>
+                <p>It gives diagnostics enough signal to explain why the retry was accepted.</p>
+              </main>
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/debug-candidates", server.uri()))
+        .arg("--json")
+        .arg("--debug")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let debug = &json["debug"];
+
+    let candidates = debug["candidates"].as_array().unwrap();
+    assert!(candidates.iter().any(|candidate| {
+        candidate["selector"] == "article"
+            && candidate["wordCount"].as_u64().unwrap() < 50
+            && candidate["decision"] == "rejected"
+    }));
+    assert!(candidates.iter().any(|candidate| {
+        candidate["selector"] == "main" && candidate["decision"] == "selected"
+    }));
+
+    let attempts = debug["fallbackAttempts"].as_array().unwrap();
+    assert!(attempts.iter().any(|attempt| {
+        attempt["name"] == "low-word-selector-retry" && attempt["accepted"] == true
+    }));
+}
+
+#[tokio::test]
 async fn json_debug_includes_cleanup_removal_reasons() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
