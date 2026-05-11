@@ -19,6 +19,7 @@ npm install -g chidori-fetch
 ## Usage
 
 ```bash
+chidori --help
 chidori https://example.com
 chidori https://example.com --json
 chidori https://example.com --output article.md
