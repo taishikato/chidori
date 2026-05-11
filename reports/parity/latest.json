@@ -1,0 +1,1487 @@
+{
+  "generatedAt": "2026-05-11T08:33:30.766Z",
+  "corpus": "parity-corpus.json",
+  "summary": {
+    "total": 24,
+    "parityOrBetter": 9,
+    "chidoriBetter": 15,
+    "chidoriWorse": 0,
+    "humanReview": 0,
+    "toolErrors": 0
+  },
+  "results": [
+    {
+      "id": "daringfireball-iphone-16e",
+      "fixture": "tests/fixtures/reference/general--daringfireball.net-2025-02-the_iphone_16e.html",
+      "sourceUrl": "https://daringfireball.net/2025/02/the_iphone_16e",
+      "category": "main-content-cleanup",
+      "capability": "article entry-point selection, heading preservation, ad/sidebar cleanup",
+      "mappedStatus": "implemented",
+      "status": "parity-or-better",
+      "similarity": 0.961,
+      "wordCount": {
+        "chidori": 2127,
+        "reference": 2075
+      },
+      "expectations": {
+        "chidori": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        },
+        "reference": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        }
+      },
+      "metadata": {
+        "chidori": {
+          "title": "The iPhone 16e",
+          "description": "The iPhone 16e is an iPhone for people who don’t want to think much about their phone. But they *do* want an iPhone, not just any “whatever” phone. A just plain iPhone, with a good screen, good enough (and simple) camera, and great battery life.",
+          "author": "",
+          "published": "",
+          "site": "Daring Fireball",
+          "image": "https://daringfireball.net/graphics/df-wide-card.png"
+        },
+        "reference": {
+          "title": "The iPhone 16e",
+          "description": "The iPhone 16e is an iPhone for people who don’t want to think much about their phone. But they *do* want an iPhone, not just any “whatever” phone. A just plain iPhone, with a good screen, good enough (and simple) camera, and great battery life.",
+          "author": "John Gruber",
+          "published": "2025-02-26T00:00:00+00:00",
+          "site": "Daring Fireball",
+          "image": "https://daringfireball.net/graphics/df-wide-card.png"
+        }
+      },
+      "commands": {
+        "chidori": {
+          "status": 0,
+          "elapsedMs": 82,
+          "stderr": "",
+          "parseError": ""
+        },
+        "reference": {
+          "status": 0,
+          "elapsedMs": 258,
+          "stderr": "",
+          "parseError": ""
+        }
+      }
+    },
+    {
+      "id": "obsidian-sync-encryption",
+      "fixture": "tests/fixtures/reference/general--obsidian.md-blog-verify-obsidian-sync-encryption.html",
+      "sourceUrl": "https://obsidian.md/blog/verify-obsidian-sync-encryption/",
+      "category": "main-content-cleanup-code",
+      "capability": "article selection, code preservation, navigation cleanup",
+      "mappedStatus": "implemented",
+      "status": "parity-or-better",
+      "similarity": 0.892,
+      "wordCount": {
+        "chidori": 811,
+        "reference": 804
+      },
+      "expectations": {
+        "chidori": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        },
+        "reference": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        }
+      },
+      "metadata": {
+        "chidori": {
+          "title": "How to verify Obsidian Sync's end-to-end encryption",
+          "description": "How can you be sure that your data is end-to-end encrypted? In this guide, we provide step-by-step instructions to trustlessly verify the end-to-end encryption of your data using Obsidian Sync.",
+          "author": "",
+          "published": "",
+          "site": "Obsidian",
+          "image": "https://obsidian.md/images/banner.png"
+        },
+        "reference": {
+          "title": "How to verify Obsidian Sync's end-to-end encryption",
+          "description": "How can you be sure that your data is end-to-end encrypted? In this guide, we provide step-by-step instructions to trustlessly verify the end-to-end encryption of your data using Obsidian Sync.",
+          "author": "Licat",
+          "published": "2023-06-05T00:00:00+00:00",
+          "site": "Obsidian",
+          "image": "https://obsidian.md/images/banner.png"
+        }
+      },
+      "commands": {
+        "chidori": {
+          "status": 0,
+          "elapsedMs": 36,
+          "stderr": "",
+          "parseError": ""
+        },
+        "reference": {
+          "status": 0,
+          "elapsedMs": 181,
+          "stderr": "",
+          "parseError": ""
+        }
+      }
+    },
+    {
+      "id": "github-pull-request",
+      "fixture": "tests/fixtures/reference/general--github.com-test-owner-test-repo-pull-42.html",
+      "sourceUrl": "https://github.com/test-owner/test-repo/pull/42",
+      "category": "specialized-content-extraction",
+      "capability": "discussion thread content preservation without repository chrome",
+      "mappedStatus": "implemented",
+      "status": "chidori-better",
+      "similarity": 0.407,
+      "wordCount": {
+        "chidori": 148,
+        "reference": 52
+      },
+      "expectations": {
+        "chidori": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        },
+        "reference": {
+          "ok": false,
+          "missingExpected": [
+            "Consider removing just the image element instead of the entire anchor",
+            "Posted a follow-up commit to address the review comments."
+          ],
+          "presentRejected": []
+        }
+      },
+      "metadata": {
+        "chidori": {
+          "title": "Fix rendering when malformed elements nest content",
+          "description": "",
+          "author": "",
+          "published": "",
+          "site": "",
+          "image": ""
+        },
+        "reference": {
+          "title": "Fix rendering when malformed elements nest content",
+          "description": "",
+          "author": "",
+          "published": "",
+          "site": "github.com",
+          "image": ""
+        }
+      },
+      "commands": {
+        "chidori": {
+          "status": 0,
+          "elapsedMs": 56,
+          "stderr": "",
+          "parseError": ""
+        },
+        "reference": {
+          "status": 0,
+          "elapsedMs": 175,
+          "stderr": "",
+          "parseError": ""
+        }
+      }
+    },
+    {
+      "id": "schema-backed-span-blocks",
+      "fixture": "tests/fixtures/reference/issues--span-with-block-children-and-schema.html",
+      "sourceUrl": "https://example.org/post-about-systems",
+      "category": "schema-backed-main-content",
+      "capability": "schema article body fallback with block children preserved",
+      "mappedStatus": "implemented",
+      "status": "parity-or-better",
+      "similarity": 1,
+      "wordCount": {
+        "chidori": 98,
+        "reference": 99
+      },
+      "expectations": {
+        "chidori": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        },
+        "reference": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        }
+      },
+      "metadata": {
+        "chidori": {
+          "title": "Post About Systems",
+          "description": "A discussion of different system types and how they interact.",
+          "author": "Author Name",
+          "published": "2024-01-15T00:00:00+00:00",
+          "site": "",
+          "image": ""
+        },
+        "reference": {
+          "title": "Post About Systems",
+          "description": "A discussion of different system types and how they interact.",
+          "author": "Author Name",
+          "published": "2024-01-15T00:00:00+00:00",
+          "site": "Author Name",
+          "image": ""
+        }
+      },
+      "commands": {
+        "chidori": {
+          "status": 0,
+          "elapsedMs": 19,
+          "stderr": "",
+          "parseError": ""
+        },
+        "reference": {
+          "status": 0,
+          "elapsedMs": 161,
+          "stderr": "",
+          "parseError": ""
+        }
+      }
+    },
+    {
+      "id": "rehype-pretty-copy-code",
+      "fixture": "tests/fixtures/reference/codeblocks--rehype-pretty-copy.html",
+      "sourceUrl": "https://example.com/weekly-project-review",
+      "category": "markdown-code-cleanup",
+      "capability": "copy-button cleanup and fenced code language preservation",
+      "mappedStatus": "implemented",
+      "status": "parity-or-better",
+      "similarity": 0.988,
+      "wordCount": {
+        "chidori": 137,
+        "reference": 133
+      },
+      "expectations": {
+        "chidori": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        },
+        "reference": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        }
+      },
+      "metadata": {
+        "chidori": {
+          "title": "Weekly Project Review",
+          "description": "Test for rehype-pretty-copy injected button and style elements inside code blocks",
+          "author": "Jane Smith",
+          "published": "",
+          "site": "",
+          "image": ""
+        },
+        "reference": {
+          "title": "Weekly Project Review",
+          "description": "Test for rehype-pretty-copy injected button and style elements inside code blocks",
+          "author": "Jane Smith",
+          "published": "",
+          "site": "Jane Smith",
+          "image": ""
+        }
+      },
+      "commands": {
+        "chidori": {
+          "status": 0,
+          "elapsedMs": 16,
+          "stderr": "",
+          "parseError": ""
+        },
+        "reference": {
+          "status": 0,
+          "elapsedMs": 154,
+          "stderr": "",
+          "parseError": ""
+        }
+      }
+    },
+    {
+      "id": "javascript-link-unwrapping",
+      "fixture": "tests/fixtures/reference/elements--javascript-links.html",
+      "sourceUrl": "https://example.com/javascript-links",
+      "category": "markdown-link-cleanup",
+      "capability": "unwrap javascript pseudo-links while preserving inline formatting and real links",
+      "mappedStatus": "implemented",
+      "status": "chidori-better",
+      "similarity": 0.941,
+      "wordCount": {
+        "chidori": 59,
+        "reference": 55
+      },
+      "expectations": {
+        "chidori": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        },
+        "reference": {
+          "ok": false,
+          "missingExpected": [
+            "[Example](https://example.com)"
+          ],
+          "presentRejected": []
+        }
+      },
+      "metadata": {
+        "chidori": {
+          "title": "JavaScript Links Test",
+          "description": "",
+          "author": "",
+          "published": "",
+          "site": "",
+          "image": ""
+        },
+        "reference": {
+          "title": "JavaScript Links Test",
+          "description": "",
+          "author": "",
+          "published": "",
+          "site": "",
+          "image": ""
+        }
+      },
+      "commands": {
+        "chidori": {
+          "status": 0,
+          "elapsedMs": 13,
+          "stderr": "",
+          "parseError": ""
+        },
+        "reference": {
+          "status": 0,
+          "elapsedMs": 137,
+          "stderr": "",
+          "parseError": ""
+        }
+      }
+    },
+    {
+      "id": "simple-table",
+      "fixture": "tests/fixtures/reference/markdown--simple-table.html",
+      "sourceUrl": "https://example.com/table-example",
+      "category": "markdown-table-formatting",
+      "capability": "simple table Markdown conversion",
+      "mappedStatus": "implemented",
+      "status": "chidori-better",
+      "similarity": 0.667,
+      "wordCount": {
+        "chidori": 23,
+        "reference": 20
+      },
+      "expectations": {
+        "chidori": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        },
+        "reference": {
+          "ok": false,
+          "missingExpected": [
+            "# Table Example"
+          ],
+          "presentRejected": []
+        }
+      },
+      "metadata": {
+        "chidori": {
+          "title": "Table Example",
+          "description": "",
+          "author": "",
+          "published": "",
+          "site": "",
+          "image": ""
+        },
+        "reference": {
+          "title": "Table Example",
+          "description": "",
+          "author": "",
+          "published": "",
+          "site": "",
+          "image": ""
+        }
+      },
+      "commands": {
+        "chidori": {
+          "status": 0,
+          "elapsedMs": 13,
+          "stderr": "",
+          "parseError": ""
+        },
+        "reference": {
+          "status": 0,
+          "elapsedMs": 134,
+          "stderr": "",
+          "parseError": ""
+        }
+      }
+    },
+    {
+      "id": "wordpress-footnotes",
+      "fixture": "tests/fixtures/reference/footnotes--wordpress-block.html",
+      "sourceUrl": "https://example.com/wordpress-footnotes",
+      "category": "markdown-footnote-formatting",
+      "capability": "WordPress footnote block Markdown conversion",
+      "mappedStatus": "implemented",
+      "status": "chidori-better",
+      "similarity": 1,
+      "wordCount": {
+        "chidori": 11,
+        "reference": 11
+      },
+      "expectations": {
+        "chidori": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        },
+        "reference": {
+          "ok": false,
+          "missingExpected": [
+            "The claim has a note[^1]."
+          ],
+          "presentRejected": []
+        }
+      },
+      "metadata": {
+        "chidori": {
+          "title": "",
+          "description": "",
+          "author": "",
+          "published": "",
+          "site": "",
+          "image": ""
+        },
+        "reference": {
+          "title": "",
+          "description": "",
+          "author": "",
+          "published": "",
+          "site": "",
+          "image": ""
+        }
+      },
+      "commands": {
+        "chidori": {
+          "status": 0,
+          "elapsedMs": 12,
+          "stderr": "",
+          "parseError": ""
+        },
+        "reference": {
+          "status": 0,
+          "elapsedMs": 147,
+          "stderr": "",
+          "parseError": ""
+        }
+      }
+    },
+    {
+      "id": "hidden-visibility-cleanup",
+      "fixture": "tests/fixtures/reference/hidden--visibility.html",
+      "sourceUrl": "https://example.com/visibility-hidden",
+      "category": "hidden-noise-cleanup",
+      "capability": "remove visibility-hidden content and embedded fallback noise",
+      "mappedStatus": "implemented",
+      "status": "parity-or-better",
+      "similarity": 1,
+      "wordCount": {
+        "chidori": 62,
+        "reference": 62
+      },
+      "expectations": {
+        "chidori": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        },
+        "reference": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        }
+      },
+      "metadata": {
+        "chidori": {
+          "title": "Lorem",
+          "description": "",
+          "author": "",
+          "published": "",
+          "site": "",
+          "image": ""
+        },
+        "reference": {
+          "title": "Visibility hidden test",
+          "description": "",
+          "author": "",
+          "published": "",
+          "site": "",
+          "image": ""
+        }
+      },
+      "commands": {
+        "chidori": {
+          "status": 0,
+          "elapsedMs": 11,
+          "stderr": "",
+          "parseError": ""
+        },
+        "reference": {
+          "status": 0,
+          "elapsedMs": 133,
+          "stderr": "",
+          "parseError": ""
+        }
+      }
+    },
+    {
+      "id": "table-of-contents-cleanup",
+      "fixture": "tests/fixtures/reference/content-patterns--table-of-contents.html",
+      "sourceUrl": "https://www.example.org/install-guide/",
+      "category": "table-of-contents-cleanup",
+      "capability": "remove fragment-only table-of-contents lists while preserving article sections and code blocks",
+      "mappedStatus": "implemented",
+      "status": "parity-or-better",
+      "similarity": 1,
+      "wordCount": {
+        "chidori": 373,
+        "reference": 355
+      },
+      "expectations": {
+        "chidori": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        },
+        "reference": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        }
+      },
+      "metadata": {
+        "chidori": {
+          "title": "Installation Guide",
+          "description": "",
+          "author": "Jane Doe",
+          "published": "",
+          "site": "",
+          "image": ""
+        },
+        "reference": {
+          "title": "Installation Guide — Example Blog",
+          "description": "",
+          "author": "Jane Doe",
+          "published": "",
+          "site": "Jane Doe",
+          "image": ""
+        }
+      },
+      "commands": {
+        "chidori": {
+          "status": 0,
+          "elapsedMs": 38,
+          "stderr": "",
+          "parseError": ""
+        },
+        "reference": {
+          "status": 0,
+          "elapsedMs": 150,
+          "stderr": "",
+          "parseError": ""
+        }
+      }
+    },
+    {
+      "id": "leading-breadcrumb-cleanup",
+      "fixture": "tests/fixtures/reference/content-patterns--leading-breadcrumb.html",
+      "sourceUrl": "https://example.com/newsletter-post",
+      "category": "breadcrumb-cleanup",
+      "capability": "remove non-semantic breadcrumb navigation injected into content",
+      "mappedStatus": "implemented",
+      "status": "parity-or-better",
+      "similarity": 1,
+      "wordCount": {
+        "chidori": 229,
+        "reference": 229
+      },
+      "expectations": {
+        "chidori": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        },
+        "reference": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        }
+      },
+      "metadata": {
+        "chidori": {
+          "title": "Sample Newsletter Post",
+          "description": "",
+          "author": "",
+          "published": "",
+          "site": "",
+          "image": ""
+        },
+        "reference": {
+          "title": "Sample Newsletter Post",
+          "description": "",
+          "author": "",
+          "published": "",
+          "site": "",
+          "image": ""
+        }
+      },
+      "commands": {
+        "chidori": {
+          "status": 0,
+          "elapsedMs": 13,
+          "stderr": "",
+          "parseError": ""
+        },
+        "reference": {
+          "status": 0,
+          "elapsedMs": 133,
+          "stderr": "",
+          "parseError": ""
+        }
+      }
+    },
+    {
+      "id": "trailing-related-links-cleanup",
+      "fixture": "tests/fixtures/reference/content-patterns--trailing-related-posts.html",
+      "sourceUrl": "https://example.com/coffee-cooling",
+      "category": "related-links-cleanup",
+      "capability": "remove short link-dense related-post sections at article end",
+      "mappedStatus": "implemented",
+      "status": "parity-or-better",
+      "similarity": 1,
+      "wordCount": {
+        "chidori": 63,
+        "reference": 62
+      },
+      "expectations": {
+        "chidori": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        },
+        "reference": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        }
+      },
+      "metadata": {
+        "chidori": {
+          "title": "How Coffee Cools",
+          "description": "",
+          "author": "",
+          "published": "",
+          "site": "",
+          "image": ""
+        },
+        "reference": {
+          "title": "Coffee Cooling Article",
+          "description": "",
+          "author": "",
+          "published": "",
+          "site": "",
+          "image": ""
+        }
+      },
+      "commands": {
+        "chidori": {
+          "status": 0,
+          "elapsedMs": 13,
+          "stderr": "",
+          "parseError": ""
+        },
+        "reference": {
+          "status": 0,
+          "elapsedMs": 134,
+          "stderr": "",
+          "parseError": ""
+        }
+      }
+    },
+    {
+      "id": "metadata-dom-author-date",
+      "fixture": "tests/fixtures/reference/metadata--dom-author-date.html",
+      "sourceUrl": "https://example.com/journal/metadata-heuristics",
+      "category": "metadata-extraction",
+      "capability": "DOM-backed author and published date metadata extraction",
+      "mappedStatus": "implemented",
+      "status": "chidori-better",
+      "similarity": 0.913,
+      "wordCount": {
+        "chidori": 28,
+        "reference": 25
+      },
+      "expectations": {
+        "chidori": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        },
+        "reference": {
+          "ok": false,
+          "missingExpected": [
+            "May 10, 2026"
+          ],
+          "presentRejected": []
+        }
+      },
+      "metadata": {
+        "chidori": {
+          "title": "Metadata Heuristics",
+          "description": "A page with DOM-only byline metadata.",
+          "author": "Ada Lovelace",
+          "published": "2026-05-10T09:30:00Z",
+          "site": "",
+          "image": ""
+        },
+        "reference": {
+          "title": "Metadata Heuristics - Example Journal",
+          "description": "A page with DOM-only byline metadata.",
+          "author": "Ada Lovelace",
+          "published": "2026-05-10T09:30:00Z",
+          "site": "Ada Lovelace",
+          "image": ""
+        }
+      },
+      "commands": {
+        "chidori": {
+          "status": 0,
+          "elapsedMs": 13,
+          "stderr": "",
+          "parseError": ""
+        },
+        "reference": {
+          "status": 0,
+          "elapsedMs": 150,
+          "stderr": "",
+          "parseError": ""
+        }
+      }
+    },
+    {
+      "id": "leetcode-problem",
+      "fixture": "tests/fixtures/reference/domain--leetcode-problem.html",
+      "sourceUrl": "https://leetcode.com/problems/two-sum/",
+      "category": "domain-specific-content-extraction",
+      "capability": "LeetCode problem statement extraction",
+      "mappedStatus": "implemented",
+      "status": "chidori-better",
+      "similarity": 1,
+      "wordCount": {
+        "chidori": 38,
+        "reference": 38
+      },
+      "expectations": {
+        "chidori": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        },
+        "reference": {
+          "ok": false,
+          "missingExpected": [
+            "# 1. Two Sum"
+          ],
+          "presentRejected": []
+        }
+      },
+      "metadata": {
+        "chidori": {
+          "title": "Two Sum - LeetCode",
+          "description": "",
+          "author": "",
+          "published": "",
+          "site": "",
+          "image": ""
+        },
+        "reference": {
+          "title": "Two Sum",
+          "description": "",
+          "author": "",
+          "published": "",
+          "site": "LeetCode",
+          "image": ""
+        }
+      },
+      "commands": {
+        "chidori": {
+          "status": 0,
+          "elapsedMs": 10,
+          "stderr": "",
+          "parseError": ""
+        },
+        "reference": {
+          "status": 0,
+          "elapsedMs": 136,
+          "stderr": "",
+          "parseError": ""
+        }
+      }
+    },
+    {
+      "id": "lwn-article",
+      "fixture": "tests/fixtures/reference/domain--lwn-article.html",
+      "sourceUrl": "https://lwn.net/Articles/123456/",
+      "category": "domain-specific-content-extraction",
+      "capability": "LWN article extraction",
+      "mappedStatus": "implemented",
+      "status": "chidori-better",
+      "similarity": 0.913,
+      "wordCount": {
+        "chidori": 31,
+        "reference": 32
+      },
+      "expectations": {
+        "chidori": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        },
+        "reference": {
+          "ok": false,
+          "missingExpected": [
+            "# A kernel story"
+          ],
+          "presentRejected": [
+            "Subscriber comments"
+          ]
+        }
+      },
+      "metadata": {
+        "chidori": {
+          "title": "A kernel story",
+          "description": "",
+          "author": "",
+          "published": "",
+          "site": "",
+          "image": ""
+        },
+        "reference": {
+          "title": "A kernel story [LWN.net]",
+          "description": "",
+          "author": "",
+          "published": "",
+          "site": "",
+          "image": ""
+        }
+      },
+      "commands": {
+        "chidori": {
+          "status": 0,
+          "elapsedMs": 11,
+          "stderr": "",
+          "parseError": ""
+        },
+        "reference": {
+          "status": 0,
+          "elapsedMs": 142,
+          "stderr": "",
+          "parseError": ""
+        }
+      }
+    },
+    {
+      "id": "ai-conversation",
+      "fixture": "tests/fixtures/reference/domain--ai-conversation.html",
+      "sourceUrl": "https://chatgpt.com/share/example-parser-issue",
+      "category": "domain-specific-content-extraction",
+      "capability": "AI conversation transcript extraction",
+      "mappedStatus": "implemented",
+      "status": "chidori-better",
+      "similarity": 0.833,
+      "wordCount": {
+        "chidori": 64,
+        "reference": 30
+      },
+      "expectations": {
+        "chidori": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        },
+        "reference": {
+          "ok": false,
+          "missingExpected": [
+            "**user**",
+            "**assistant**"
+          ],
+          "presentRejected": [
+            "Message controls"
+          ]
+        }
+      },
+      "metadata": {
+        "chidori": {
+          "title": "Example Chat",
+          "description": "",
+          "author": "",
+          "published": "",
+          "site": "",
+          "image": ""
+        },
+        "reference": {
+          "title": "Example Chat",
+          "description": "",
+          "author": "",
+          "published": "",
+          "site": "",
+          "image": ""
+        }
+      },
+      "commands": {
+        "chidori": {
+          "status": 0,
+          "elapsedMs": 13,
+          "stderr": "",
+          "parseError": ""
+        },
+        "reference": {
+          "status": 0,
+          "elapsedMs": 149,
+          "stderr": "",
+          "parseError": ""
+        }
+      }
+    },
+    {
+      "id": "hacker-news-listing",
+      "fixture": "tests/fixtures/reference/domain--hacker-news-listing.html",
+      "sourceUrl": "https://news.ycombinator.com/news",
+      "category": "domain-specific-content-extraction",
+      "capability": "Hacker News listing extraction",
+      "mappedStatus": "implemented",
+      "status": "chidori-better",
+      "similarity": 0.683,
+      "wordCount": {
+        "chidori": 38,
+        "reference": 47
+      },
+      "expectations": {
+        "chidori": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        },
+        "reference": {
+          "ok": false,
+          "missingExpected": [
+            "1. [Launch notes for a useful parser](https://example.com/post-one)",
+            "2. [Ask HN: Keeping extracted content stable?](https://news.ycombinator.com/item?id=402)"
+          ],
+          "presentRejected": [
+            "past",
+            "More"
+          ]
+        }
+      },
+      "metadata": {
+        "chidori": {
+          "title": "",
+          "description": "",
+          "author": "",
+          "published": "",
+          "site": "",
+          "image": ""
+        },
+        "reference": {
+          "title": "",
+          "description": "",
+          "author": "",
+          "published": "",
+          "site": "",
+          "image": ""
+        }
+      },
+      "commands": {
+        "chidori": {
+          "status": 0,
+          "elapsedMs": 11,
+          "stderr": "",
+          "parseError": ""
+        },
+        "reference": {
+          "status": 0,
+          "elapsedMs": 155,
+          "stderr": "",
+          "parseError": ""
+        }
+      }
+    },
+    {
+      "id": "bluesky-thread",
+      "fixture": "tests/fixtures/reference/domain--bluesky-thread.html",
+      "sourceUrl": "https://bsky.app/profile/alice.bsky.social/post/3example",
+      "category": "domain-specific-content-extraction",
+      "capability": "Bluesky thread extraction",
+      "mappedStatus": "implemented",
+      "status": "chidori-better",
+      "similarity": 0.684,
+      "wordCount": {
+        "chidori": 31,
+        "reference": 13
+      },
+      "expectations": {
+        "chidori": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        },
+        "reference": {
+          "ok": false,
+          "missingExpected": [
+            "@alice.bsky.social · May 8, 2026",
+            "> Bob Example",
+            "> @bob.bsky.social",
+            "> A reply should remain subordinate."
+          ],
+          "presentRejected": []
+        }
+      },
+      "metadata": {
+        "chidori": {
+          "title": "",
+          "description": "",
+          "author": "",
+          "published": "2026-05-08T15:04:00Z",
+          "site": "",
+          "image": ""
+        },
+        "reference": {
+          "title": "",
+          "description": "",
+          "author": "",
+          "published": "2026-05-08T15:04:00Z",
+          "site": "",
+          "image": ""
+        }
+      },
+      "commands": {
+        "chidori": {
+          "status": 0,
+          "elapsedMs": 10,
+          "stderr": "",
+          "parseError": ""
+        },
+        "reference": {
+          "status": 0,
+          "elapsedMs": 146,
+          "stderr": "",
+          "parseError": ""
+        }
+      }
+    },
+    {
+      "id": "threads-post",
+      "fixture": "tests/fixtures/reference/domain--threads-post.html",
+      "sourceUrl": "https://www.threads.net/@alice/post/example",
+      "category": "domain-specific-content-extraction",
+      "capability": "Threads post extraction",
+      "mappedStatus": "implemented",
+      "status": "chidori-better",
+      "similarity": 0.467,
+      "wordCount": {
+        "chidori": 21,
+        "reference": 7
+      },
+      "expectations": {
+        "chidori": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        },
+        "reference": {
+          "ok": false,
+          "missingExpected": [
+            "alice",
+            "May 8",
+            "> reader",
+            "> This reply gives useful context."
+          ],
+          "presentRejected": []
+        }
+      },
+      "metadata": {
+        "chidori": {
+          "title": "",
+          "description": "",
+          "author": "",
+          "published": "2026-05-08T15:04:00Z",
+          "site": "",
+          "image": ""
+        },
+        "reference": {
+          "title": "",
+          "description": "",
+          "author": "",
+          "published": "2026-05-08T15:04:00Z",
+          "site": "",
+          "image": ""
+        }
+      },
+      "commands": {
+        "chidori": {
+          "status": 0,
+          "elapsedMs": 11,
+          "stderr": "",
+          "parseError": ""
+        },
+        "reference": {
+          "status": 0,
+          "elapsedMs": 142,
+          "stderr": "",
+          "parseError": ""
+        }
+      }
+    },
+    {
+      "id": "linkedin-post",
+      "fixture": "tests/fixtures/reference/domain--linkedin-post.html",
+      "sourceUrl": "https://www.linkedin.com/posts/ada-example_parser-report",
+      "category": "domain-specific-content-extraction",
+      "capability": "LinkedIn post extraction",
+      "mappedStatus": "implemented",
+      "status": "parity-or-better",
+      "similarity": 1,
+      "wordCount": {
+        "chidori": 14,
+        "reference": 14
+      },
+      "expectations": {
+        "chidori": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        },
+        "reference": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        }
+      },
+      "metadata": {
+        "chidori": {
+          "title": "",
+          "description": "",
+          "author": "",
+          "published": "",
+          "site": "",
+          "image": ""
+        },
+        "reference": {
+          "title": "",
+          "description": "",
+          "author": "",
+          "published": "",
+          "site": "",
+          "image": ""
+        }
+      },
+      "commands": {
+        "chidori": {
+          "status": 0,
+          "elapsedMs": 10,
+          "stderr": "",
+          "parseError": ""
+        },
+        "reference": {
+          "status": 0,
+          "elapsedMs": 141,
+          "stderr": "",
+          "parseError": ""
+        }
+      }
+    },
+    {
+      "id": "reddit-discussion",
+      "fixture": "tests/fixtures/reference/domain--reddit-discussion.html",
+      "sourceUrl": "https://www.reddit.com/r/rust/comments/abc123/example_post/",
+      "category": "domain-specific-content-extraction",
+      "capability": "Reddit post and comment extraction",
+      "mappedStatus": "implemented",
+      "status": "chidori-better",
+      "similarity": 0.528,
+      "wordCount": {
+        "chidori": 128,
+        "reference": 48
+      },
+      "expectations": {
+        "chidori": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        },
+        "reference": {
+          "ok": false,
+          "missingExpected": [
+            "u/systemsreader",
+            "91 points · 2 days ago",
+            "This is the moment Rust starts feeling like design feedback",
+            "> u/borrowedbits",
+            "> 28 points · 2 days ago",
+            "> That phrasing helped me too",
+            "u/macromender",
+            "47 points · 2 days ago",
+            "Small parser projects are perfect"
+          ],
+          "presentRejected": []
+        }
+      },
+      "metadata": {
+        "chidori": {
+          "title": "Rust ownership finally clicked for me",
+          "description": "",
+          "author": "",
+          "published": "2025-04-02T09:30:00Z",
+          "site": "",
+          "image": ""
+        },
+        "reference": {
+          "title": "Example post",
+          "description": "",
+          "author": "",
+          "published": "2025-04-02T09:30:00Z",
+          "site": "Reddit",
+          "image": ""
+        }
+      },
+      "commands": {
+        "chidori": {
+          "status": 0,
+          "elapsedMs": 12,
+          "stderr": "",
+          "parseError": ""
+        },
+        "reference": {
+          "status": 0,
+          "elapsedMs": 159,
+          "stderr": "",
+          "parseError": ""
+        }
+      }
+    },
+    {
+      "id": "federated-status-thread",
+      "fixture": "tests/fixtures/reference/domain--federated-status-thread.html",
+      "sourceUrl": "https://mastodon.social/@alice/112233445566778899",
+      "category": "domain-specific-content-extraction",
+      "capability": "federated status/thread extraction",
+      "mappedStatus": "implemented",
+      "status": "chidori-better",
+      "similarity": 0.552,
+      "wordCount": {
+        "chidori": 62,
+        "reference": 73
+      },
+      "expectations": {
+        "chidori": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        },
+        "reference": {
+          "ok": false,
+          "missingExpected": [
+            "Alice Example",
+            "@alice@mastodon.social",
+            "May 8, 2026, 3:04 PM",
+            "> Bob Builder",
+            "> @bob@example.net",
+            "> May 8, 2026, 3:20 PM",
+            "> This makes saved social threads much easier to read from the CLI."
+          ],
+          "presentRejected": [
+            "New to Mastodon?",
+            "Promoted suggestion",
+            "Promoted status card",
+            "Promoted Person",
+            "Boost"
+          ]
+        }
+      },
+      "metadata": {
+        "chidori": {
+          "title": "Alice Example - Mastodon",
+          "description": "",
+          "author": "",
+          "published": "2026-05-08T14:55:00Z",
+          "site": "",
+          "image": ""
+        },
+        "reference": {
+          "title": "Alice Example",
+          "description": "",
+          "author": "",
+          "published": "2026-05-08T14:55:00Z",
+          "site": "Mastodon",
+          "image": ""
+        }
+      },
+      "commands": {
+        "chidori": {
+          "status": 0,
+          "elapsedMs": 12,
+          "stderr": "",
+          "parseError": ""
+        },
+        "reference": {
+          "status": 0,
+          "elapsedMs": 168,
+          "stderr": "",
+          "parseError": ""
+        }
+      }
+    },
+    {
+      "id": "microblog-status-thread",
+      "fixture": "tests/fixtures/reference/domain--microblog-status-thread.html",
+      "sourceUrl": "https://x.com/parserbird/status/1788600000000000000",
+      "category": "domain-specific-content-extraction",
+      "capability": "X/Twitter-style status/thread extraction",
+      "mappedStatus": "implemented",
+      "status": "chidori-better",
+      "similarity": 0.755,
+      "wordCount": {
+        "chidori": 79,
+        "reference": 43
+      },
+      "expectations": {
+        "chidori": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        },
+        "reference": {
+          "ok": false,
+          "missingExpected": [
+            "> Reader Fox",
+            "> @readerfox",
+            "> This keeps short status threads useful from a terminal."
+          ],
+          "presentRejected": []
+        }
+      },
+      "metadata": {
+        "chidori": {
+          "title": "Chidori Parser on X",
+          "description": "",
+          "author": "",
+          "published": "2026-05-08T18:00:00.000Z",
+          "site": "",
+          "image": ""
+        },
+        "reference": {
+          "title": "Chidori Parser on X",
+          "description": "",
+          "author": "",
+          "published": "2026-05-08T18:00:00.000Z",
+          "site": "",
+          "image": ""
+        }
+      },
+      "commands": {
+        "chidori": {
+          "status": 0,
+          "elapsedMs": 13,
+          "stderr": "",
+          "parseError": ""
+        },
+        "reference": {
+          "status": 0,
+          "elapsedMs": 174,
+          "stderr": "",
+          "parseError": ""
+        }
+      }
+    },
+    {
+      "id": "video-watch-page",
+      "fixture": "tests/fixtures/reference/domain--video-watch-page.html",
+      "sourceUrl": "https://www.youtube.com/watch?v=abc123xyz",
+      "category": "domain-specific-content-extraction",
+      "capability": "YouTube watch-page extraction",
+      "mappedStatus": "implemented",
+      "status": "chidori-better",
+      "similarity": 0.613,
+      "wordCount": {
+        "chidori": 51,
+        "reference": 87
+      },
+      "expectations": {
+        "chidori": {
+          "ok": true,
+          "missingExpected": [],
+          "presentRejected": []
+        },
+        "reference": {
+          "ok": false,
+          "missingExpected": [
+            "May 8, 2026"
+          ],
+          "presentRejected": [
+            "Subscribe",
+            "subscribe",
+            "Share",
+            "Save",
+            "Video player placeholder",
+            "Inline Recommendation That Should Not Win",
+            "Wrong Channel",
+            "Inline Wrong Channel",
+            "456K views",
+            "123K views",
+            "Inline recommendation description should not appear",
+            "Inline transcript should not appear"
+          ]
+        }
+      },
+      "metadata": {
+        "chidori": {
+          "title": "Building a Parser Garden",
+          "description": "",
+          "author": "",
+          "published": "",
+          "site": "",
+          "image": ""
+        },
+        "reference": {
+          "title": "Building a Parser Garden",
+          "description": "",
+          "author": "",
+          "published": "",
+          "site": "YouTube",
+          "image": ""
+        }
+      },
+      "commands": {
+        "chidori": {
+          "status": 0,
+          "elapsedMs": 11,
+          "stderr": "",
+          "parseError": ""
+        },
+        "reference": {
+          "status": 0,
+          "elapsedMs": 166,
+          "stderr": "",
+          "parseError": ""
+        }
+      }
+    }
+  ]
+}

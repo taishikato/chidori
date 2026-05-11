@@ -112,6 +112,44 @@
     ]
   },
   {
+    "id": "simple-table",
+    "fixture": "tests/fixtures/reference/markdown--simple-table.html",
+    "sourceUrl": "https://example.com/table-example",
+    "category": "markdown-table-formatting",
+    "reference": "accepted-reference-output",
+    "capability": "simple table Markdown conversion",
+    "status": "implemented",
+    "expected": [
+      "# Table Example",
+      "| Name | Score |",
+      "| Alpha | 10 |",
+      "| Beta | 20 |"
+    ],
+    "rejected": [
+      "<table>",
+      "<td>",
+      "<th>"
+    ]
+  },
+  {
+    "id": "wordpress-footnotes",
+    "fixture": "tests/fixtures/reference/footnotes--wordpress-block.html",
+    "sourceUrl": "https://example.com/wordpress-footnotes",
+    "category": "markdown-footnote-formatting",
+    "reference": "accepted-reference-output",
+    "capability": "WordPress footnote block Markdown conversion",
+    "status": "implemented",
+    "expected": [
+      "The claim has a note[^1].",
+      "[^1]: WordPress block footnote text."
+    ],
+    "rejected": [
+      "wp-block-footnotes",
+      "↩",
+      "fnref-1"
+    ]
+  },
+  {
     "id": "hidden-visibility-cleanup",
     "fixture": "tests/fixtures/reference/hidden--visibility.html",
     "sourceUrl": "https://example.com/visibility-hidden",
@@ -186,6 +224,81 @@
     ]
   },
   {
+    "id": "metadata-dom-author-date",
+    "fixture": "tests/fixtures/reference/metadata--dom-author-date.html",
+    "sourceUrl": "https://example.com/journal/metadata-heuristics",
+    "category": "metadata-extraction",
+    "reference": "accepted-reference-output",
+    "capability": "DOM-backed author and published date metadata extraction",
+    "status": "implemented",
+    "expected": [
+      "# Metadata Heuristics",
+      "By [Ada Lovelace](/authors/ada)",
+      "May 10, 2026",
+      "The article body starts here and should remain ordinary content."
+    ],
+    "rejected": [
+      "A short deck that should not become the author.\n\nBy A short deck",
+      "Related posts"
+    ]
+  },
+  {
+    "id": "leetcode-problem",
+    "fixture": "tests/fixtures/reference/domain--leetcode-problem.html",
+    "sourceUrl": "https://leetcode.com/problems/two-sum/",
+    "category": "domain-specific-content-extraction",
+    "reference": "accepted-reference-output",
+    "capability": "LeetCode problem statement extraction",
+    "status": "implemented",
+    "expected": [
+      "# 1. Two Sum",
+      "Given an array of integers nums",
+      "Input: nums = [2,7,11,15], target = 9"
+    ],
+    "rejected": [
+      "Problems Discuss Store",
+      "Similar Questions"
+    ]
+  },
+  {
+    "id": "lwn-article",
+    "fixture": "tests/fixtures/reference/domain--lwn-article.html",
+    "sourceUrl": "https://lwn.net/Articles/123456/",
+    "category": "domain-specific-content-extraction",
+    "reference": "accepted-reference-output",
+    "capability": "LWN article extraction",
+    "status": "implemented",
+    "expected": [
+      "# A kernel story",
+      "By Example Author",
+      "May 9, 2026",
+      "The kernel community discussed a careful change to subsystem ownership."
+    ],
+    "rejected": [
+      "Subscriber comments"
+    ]
+  },
+  {
+    "id": "ai-conversation",
+    "fixture": "tests/fixtures/reference/domain--ai-conversation.html",
+    "sourceUrl": "https://chatgpt.com/share/example-parser-issue",
+    "category": "domain-specific-content-extraction",
+    "reference": "accepted-reference-output",
+    "capability": "AI conversation transcript extraction",
+    "status": "implemented",
+    "expected": [
+      "**user**",
+      "Can you summarize the parser issue?",
+      "**assistant**",
+      "The parser selected a sidebar before the article body.",
+      "Add a fixture where the body fallback must win."
+    ],
+    "rejected": [
+      "Message controls",
+      "Upgrade plan"
+    ]
+  },
+  {
     "id": "hacker-news-listing",
     "fixture": "tests/fixtures/reference/domain--hacker-news-listing.html",
     "sourceUrl": "https://news.ycombinator.com/news",
@@ -203,6 +316,64 @@
     "rejected": [
       "past",
       "More"
+    ]
+  },
+  {
+    "id": "bluesky-thread",
+    "fixture": "tests/fixtures/reference/domain--bluesky-thread.html",
+    "sourceUrl": "https://bsky.app/profile/alice.bsky.social/post/3example",
+    "category": "domain-specific-content-extraction",
+    "reference": "accepted-reference-output",
+    "capability": "Bluesky thread extraction",
+    "status": "implemented",
+    "expected": [
+      "Alice Example",
+      "@alice.bsky.social · May 8, 2026",
+      "Bluesky extraction keeps the primary post readable.",
+      "> Bob Example",
+      "> @bob.bsky.social",
+      "> A reply should remain subordinate."
+    ],
+    "rejected": [
+      "Trending topics"
+    ]
+  },
+  {
+    "id": "threads-post",
+    "fixture": "tests/fixtures/reference/domain--threads-post.html",
+    "sourceUrl": "https://www.threads.net/@alice/post/example",
+    "category": "domain-specific-content-extraction",
+    "reference": "accepted-reference-output",
+    "capability": "Threads post extraction",
+    "status": "implemented",
+    "expected": [
+      "alice",
+      "May 8",
+      "Threads extraction should keep the post text.",
+      "> reader",
+      "> This reply gives useful context."
+    ],
+    "rejected": [
+      "For You Following",
+      "Follow",
+      "Like Reply Share"
+    ]
+  },
+  {
+    "id": "linkedin-post",
+    "fixture": "tests/fixtures/reference/domain--linkedin-post.html",
+    "sourceUrl": "https://www.linkedin.com/posts/ada-example_parser-report",
+    "category": "domain-specific-content-extraction",
+    "reference": "accepted-reference-output",
+    "capability": "LinkedIn post extraction",
+    "status": "implemented",
+    "expected": [
+      "Ada Lovelace",
+      "LinkedIn extraction should preserve the post body and links.",
+      "[Read the report](https://example.com/report)"
+    ],
+    "rejected": [
+      "Promoted jobs"
     ]
   },
   {
