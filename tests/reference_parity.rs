@@ -504,6 +504,77 @@ fn microblog_status_thread_keeps_primary_status_and_replies_only() {
 }
 
 #[test]
+fn bluesky_thread_reference_extracts_post_and_reply() {
+    let markdown = fixture_to_markdown(
+        "domain--bluesky-thread.html",
+        "https://bsky.app/profile/alice.bsky.social/post/abc123",
+    );
+    assert_contains_all(
+        &markdown,
+        &["Alice Example", "Bluesky extraction keeps", "> Bob Example"],
+    );
+    assert_contains_none(&markdown, &["Trending topics"]);
+    assert_occurs_once(&markdown, "Alice Example");
+    assert_occurs_once(
+        &markdown,
+        "Bluesky extraction keeps the primary post readable.",
+    );
+    assert_occurs_once(&markdown, "Bob Example");
+    assert_occurs_once(&markdown, "A reply should remain subordinate.");
+}
+
+#[test]
+fn threads_post_reference_extracts_post_and_reply() {
+    let markdown = fixture_to_markdown(
+        "domain--threads-post.html",
+        "https://www.threads.net/@alice/post/abc123",
+    );
+    assert_contains_all(
+        &markdown,
+        &["alice", "Threads extraction should keep", "> reader"],
+    );
+    assert_contains_none(
+        &markdown,
+        &["For You Following", "Follow", "Like Reply Share"],
+    );
+    assert_occurs_once(&markdown, "alice");
+    assert_occurs_once(&markdown, "Threads extraction should keep the post text.");
+    assert_occurs_once(&markdown, "reader");
+    assert_occurs_once(&markdown, "This reply gives useful context.");
+}
+
+#[test]
+fn threads_profile_reference_does_not_format_articles_as_thread_replies() {
+    let markdown = fixture_to_markdown(
+        "domain--threads-post.html",
+        "https://www.threads.net/@alice",
+    );
+
+    assert_contains_all(
+        &markdown,
+        &["alice", "Threads extraction should keep", "reader"],
+    );
+    assert_contains_none(&markdown, &["> reader"]);
+}
+
+#[test]
+fn linkedin_post_reference_extracts_post_body() {
+    let markdown = fixture_to_markdown(
+        "domain--linkedin-post.html",
+        "https://www.linkedin.com/posts/example",
+    );
+    assert_contains_all(
+        &markdown,
+        &[
+            "Ada Lovelace",
+            "LinkedIn extraction should preserve",
+            "[Read the report](https://example.com/report)",
+        ],
+    );
+    assert_contains_none(&markdown, &["Promoted jobs"]);
+}
+
+#[test]
 fn matches_reference_rehype_pretty_copy_code_block_output() {
     let markdown = fixture_to_markdown(
         "codeblocks--rehype-pretty-copy.html",

@@ -87,6 +87,12 @@ struct MicroblogSelectors {
     bodies: Selector,
 }
 
+#[derive(Clone, Copy)]
+enum SocialThreadSite {
+    Bluesky,
+    Threads,
+}
+
 fn selector_priority(selector_count: usize, selector_index: usize) -> isize {
     ((selector_count - selector_index) * 40) as isize
 }
@@ -290,6 +296,13 @@ fn known_site_content_candidate(
         r#"[data-track-load="description_content"]"#
     } else if host_matches(host, "lwn.net") {
         ".ArticleText"
+    } else if host_matches(host, "bsky.app")
+        || host_matches(host, "threads.net")
+        || host_matches(host, "threads.com")
+    {
+        r#"main"#
+    } else if host_matches(host, "linkedin.com") {
+        r#"main article, article"#
     } else {
         return Ok(None);
     };
@@ -303,6 +316,11 @@ fn known_site_content_candidate(
     else {
         return Ok(None);
     };
+    if let Some(site) = social_thread_site(doc, host) {
+        if let Some(html) = social_thread_candidate(content, site)? {
+            return Ok(Some((content_selector.to_string(), html)));
+        }
+    }
 
     let title_selector = Selector::parse("h1, #firstHeading, .PageHeadline")
         .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
@@ -322,6 +340,168 @@ fn known_site_content_candidate(
     output.push_str("</article>");
 
     Ok(Some((content_selector.to_string(), output)))
+}
+
+fn social_thread_site(doc: &ParsedDocument, host: &str) -> Option<SocialThreadSite> {
+    let segments: Vec<_> = doc.url.path_segments()?.collect();
+
+    if host_matches(host, "bsky.app") {
+        (segments.len() >= 4
+            && segments[0] == "profile"
+            && !segments[1].is_empty()
+            && segments[2] == "post"
+            && !segments[3].is_empty())
+        .then_some(SocialThreadSite::Bluesky)
+    } else if host_matches(host, "threads.net") || host_matches(host, "threads.com") {
+        (segments.len() >= 3
+            && segments[0].starts_with('@')
+            && segments[0].len() > 1
+            && segments[1] == "post"
+            && !segments[2].is_empty())
+        .then_some(SocialThreadSite::Threads)
+    } else {
+        None
+    }
+}
+
+fn social_thread_candidate(
+    root: ElementRef<'_>,
+    site: SocialThreadSite,
+) -> Result<Option<String>, ChidoriError> {
+    let article_selector =
+        Selector::parse("article").map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let author_selector = Selector::parse(r#"a[href^="/profile/"], a[href^="/@"]"#)
+        .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let handle_selector =
+        Selector::parse("span").map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let time_selector =
+        Selector::parse("time").map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let bluesky_body_selector = Selector::parse(r#"[data-testid="postText"]"#)
+        .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let threads_body_selector =
+        Selector::parse("div").map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let threads_chrome_selector =
+        Selector::parse(r#"a[href^="/@"], time, button, header, footer, nav"#)
+            .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+
+    let mut output = String::from("<article class=\"chidori-social-thread\">");
+    let mut post_count = 0;
+    for article in root
+        .select(&article_selector)
+        .filter(|article| nearest_social_article_parent(*article, &article_selector).is_none())
+    {
+        let Some(body) = social_thread_body(
+            article,
+            site,
+            &article_selector,
+            &bluesky_body_selector,
+            &threads_body_selector,
+            &threads_chrome_selector,
+        ) else {
+            continue;
+        };
+
+        if post_count > 0 {
+            output.push_str("<blockquote>");
+        } else {
+            output.push_str("<section class=\"chidori-social-post\">");
+        }
+
+        if let Some(author) = article
+            .descendent_elements()
+            .find(|element| {
+                author_selector.matches(element)
+                    && nearest_social_article(*element, &article_selector) == Some(article)
+            })
+            .map(element_text)
+            .filter(|author| !author.is_empty())
+        {
+            output.push_str("<p>");
+            output.push_str(&encode_text(&author));
+            output.push_str("</p>");
+        }
+
+        let mut meta = Vec::new();
+        if let Some(handle) = article
+            .descendent_elements()
+            .find(|element| {
+                handle_selector.matches(element)
+                    && nearest_social_article(*element, &article_selector) == Some(article)
+            })
+            .map(element_text)
+            .filter(|handle| handle.starts_with('@'))
+        {
+            meta.push(handle);
+        }
+        if let Some(date) = article
+            .descendent_elements()
+            .find(|element| {
+                time_selector.matches(element)
+                    && nearest_social_article(*element, &article_selector) == Some(article)
+            })
+            .map(element_text)
+            .filter(|date| !date.is_empty())
+        {
+            meta.push(date);
+        }
+        push_meta_paragraph(&mut output, &meta);
+        output.push_str(&body.inner_html());
+
+        if post_count > 0 {
+            output.push_str("</blockquote>");
+        } else {
+            output.push_str("</section>");
+        }
+        post_count += 1;
+    }
+    output.push_str("</article>");
+
+    if post_count == 0 {
+        Ok(None)
+    } else {
+        Ok(Some(output))
+    }
+}
+
+fn social_thread_body<'a>(
+    article: ElementRef<'a>,
+    site: SocialThreadSite,
+    article_selector: &Selector,
+    bluesky_body_selector: &Selector,
+    threads_body_selector: &Selector,
+    threads_chrome_selector: &Selector,
+) -> Option<ElementRef<'a>> {
+    match site {
+        SocialThreadSite::Bluesky => article.descendent_elements().find(|element| {
+            bluesky_body_selector.matches(element)
+                && nearest_social_article(*element, article_selector) == Some(article)
+                && !element_text(*element).is_empty()
+        }),
+        SocialThreadSite::Threads => article.descendent_elements().find(|element| {
+            threads_body_selector.matches(element)
+                && nearest_social_article(*element, article_selector) == Some(article)
+                && !element_text(*element).is_empty()
+                && element.select(threads_chrome_selector).next().is_none()
+        }),
+    }
+}
+
+fn nearest_social_article<'a>(
+    element: ElementRef<'a>,
+    article_selector: &Selector,
+) -> Option<ElementRef<'a>> {
+    element.ancestors().find_map(|ancestor| {
+        ElementRef::wrap(ancestor).filter(|ancestor| article_selector.matches(ancestor))
+    })
+}
+
+fn nearest_social_article_parent<'a>(
+    article: ElementRef<'a>,
+    article_selector: &Selector,
+) -> Option<ElementRef<'a>> {
+    article.ancestors().skip(1).find_map(|ancestor| {
+        ElementRef::wrap(ancestor).filter(|ancestor| article_selector.matches(ancestor))
+    })
 }
 
 fn host_matches(host: &str, domain: &str) -> bool {
