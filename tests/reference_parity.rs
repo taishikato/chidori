@@ -1,6 +1,7 @@
 use chidori::{
     cleaner::{clean_html, CleanOptions},
     document::ParsedDocument,
+    extractor::extract_main_content,
     extractor::extract_main_html,
     markdown::{html_to_markdown, MarkdownOptions},
 };
@@ -39,6 +40,33 @@ fn assert_occurs_once(markdown: &str, snippet: &str) {
         1,
         "expected markdown to contain {snippet:?} exactly once\n\n{markdown}"
     );
+}
+
+#[test]
+fn ai_conversation_reference_extracts_turns() {
+    let html =
+        std::fs::read_to_string("tests/fixtures/reference/domain--ai-conversation.html").unwrap();
+    let doc = ParsedDocument::parse(
+        html,
+        Url::parse("https://chatgpt.com/share/example").unwrap(),
+    );
+    let extracted = extract_main_content(&doc).unwrap();
+    assert_eq!(extracted.selector.as_deref(), Some("ai-conversation"));
+
+    let markdown = fixture_to_markdown(
+        "domain--ai-conversation.html",
+        "https://chatgpt.com/share/example",
+    );
+
+    assert_contains_all(
+        &markdown,
+        &[
+            "Can you summarize the parser issue?",
+            "The parser selected a sidebar before the article body.",
+            "Add a fixture where the body fallback must win.",
+        ],
+    );
+    assert_contains_none(&markdown, &["Upgrade plan", "Message controls"]);
 }
 
 #[test]
