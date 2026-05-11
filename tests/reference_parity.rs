@@ -344,6 +344,24 @@ fn video_watch_reference_uses_only_primary_watch_content() {
 }
 
 #[test]
+fn lwn_article_reference_extracts_article_text() {
+    let markdown = fixture_to_markdown(
+        "domain--lwn-article.html",
+        "https://lwn.net/Articles/123456/",
+    );
+
+    assert_contains_all(
+        &markdown,
+        &[
+            "# A kernel story",
+            "The kernel community discussed a careful change",
+            "hidden assumptions",
+        ],
+    );
+    assert_contains_none(&markdown, &["Subscriber comments"]);
+}
+
+#[test]
 fn leetcode_problem_reference_extracts_problem_statement() {
     let markdown = fixture_to_markdown(
         "domain--leetcode-problem.html",

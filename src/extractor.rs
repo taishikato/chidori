@@ -279,6 +279,8 @@ fn known_site_content_candidate(
         ".topic-post .cooked, #post_1 .cooked, article .cooked"
     } else if host_matches(host, "leetcode.com") {
         r#"[data-track-load="description_content"]"#
+    } else if host_matches(host, "lwn.net") {
+        ".ArticleText"
     } else {
         return Ok(None);
     };
@@ -293,7 +295,7 @@ fn known_site_content_candidate(
         return Ok(None);
     };
 
-    let title_selector = Selector::parse("h1, #firstHeading")
+    let title_selector = Selector::parse("h1, #firstHeading, .PageHeadline")
         .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
     let title = doc
         .dom
