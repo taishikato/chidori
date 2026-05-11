@@ -75,6 +75,26 @@ fn restores_specialized_elements_inside_markdown_table_cells() {
 }
 
 #[test]
+fn named_footnote_refs_match_named_definitions() {
+    let html = r##"
+    <article>
+      <p>A named note<sup><a href="#fn-note" id="fnref-note">note</a></sup>.</p>
+      <section id="footnotes">
+        <ol>
+          <li id="fn-note">Named footnote text. <a href="#fnref-note">↩</a></li>
+        </ol>
+      </section>
+    </article>"##;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("[^note]."), "{markdown}");
+    assert!(
+        markdown.contains("[^note]: Named footnote text."),
+        "{markdown}"
+    );
+}
+
+#[test]
 fn extracts_basic_metadata() {
     let html = r#"<!doctype html>
     <html lang="en">
@@ -116,6 +136,137 @@ fn cleans_site_suffix_from_html_title_when_site_name_is_known() {
 
     assert_eq!(metadata.title, "Readable Article");
     assert_eq!(metadata.site, "Example Site");
+}
+
+#[test]
+fn html_title_beats_unrelated_article_h1() {
+    let html = r#"<!doctype html>
+    <html>
+      <head><title>Actual Article Title</title></head>
+      <body>
+        <article>
+          <h1>Comments</h1>
+          <p>The readable article text is still here.</p>
+        </article>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.title, "Actual Article Title");
+}
+
+#[test]
+fn html_title_beats_short_article_h1_even_when_it_overlaps() {
+    let html = r#"<!doctype html>
+    <html>
+      <head><title>Actual Article Comments</title></head>
+      <body>
+        <article>
+          <h1>Comments</h1>
+          <p>The readable article text is still here.</p>
+        </article>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.title, "Actual Article Comments");
+}
+
+#[test]
+fn article_h1_beats_site_only_html_title() {
+    let html = r#"<!doctype html>
+    <html>
+      <head><title>Example Site</title></head>
+      <body>
+        <article>
+          <h1>Actual Article Title</h1>
+          <p>The readable article text is still here.</p>
+        </article>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.title, "Actual Article Title");
+}
+
+#[test]
+fn threads_body_allows_profile_mentions_inside_text() {
+    let html = r#"<!doctype html>
+    <html><body>
+      <main>
+        <article>
+          <div>
+            <header>
+              <a href="/@alice">alice</a>
+              <time datetime="2026-05-08T15:04:00Z">May 8</time>
+              <button>Follow</button>
+            </header>
+            <div>Shipping the parser update with <a href="/@bob">@bob</a> today.</div>
+            <footer>Like Reply Share</footer>
+          </div>
+        </article>
+      </main>
+    </body></html>"#;
+    let doc = ParsedDocument::parse(
+        html,
+        Url::parse("https://www.threads.net/@alice/post/abc123").unwrap(),
+    );
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("chidori-social-thread"), "{main}");
+    assert!(main.contains("@bob"), "{main}");
+    assert!(!main.contains("Follow"), "{main}");
+    assert!(!main.contains("Like Reply Share"), "{main}");
+}
+
+#[test]
+fn threads_body_skips_profile_only_divs_before_post_text() {
+    let html = r#"<!doctype html>
+    <html><body>
+      <main>
+        <article>
+          <div>
+            <a href="/@alice">alice</a>
+          </div>
+          <div>Shipping the parser update with <a href="/@bob">@bob</a> today.</div>
+        </article>
+      </main>
+    </body></html>"#;
+    let doc = ParsedDocument::parse(
+        html,
+        Url::parse("https://www.threads.net/@alice/post/abc123").unwrap(),
+    );
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("chidori-social-thread"), "{main}");
+    assert!(main.contains("@bob"), "{main}");
+}
+
+#[test]
+fn threads_body_uses_nested_post_text_instead_of_profile_wrapper() {
+    let html = r#"<!doctype html>
+    <html><body>
+      <main>
+        <article>
+          <div>
+            <div><a href="/@alice">alice</a></div>
+            <div>Shipping the parser update with <a href="/@bob">@bob</a> today.</div>
+          </div>
+        </article>
+      </main>
+    </body></html>"#;
+    let doc = ParsedDocument::parse(
+        html,
+        Url::parse("https://www.threads.net/@alice/post/abc123").unwrap(),
+    );
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("chidori-social-thread"), "{main}");
+    assert!(main.contains("@bob"), "{main}");
+    assert!(!main.contains("href=\"/@alice\""), "{main}");
 }
 
 #[test]

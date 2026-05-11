@@ -760,7 +760,7 @@ fn footnote_id_from_attr_value(value: &str) -> Option<String> {
         return footnote_id_from_prefixed_value(fragment, &["fn-", "footnote-"]);
     }
 
-    footnote_id_from_prefixed_value(value, &["fnref-", "footnote-ref-", "fn-"])
+    footnote_id_from_prefixed_value(value, &["fnref-", "footnote-ref-"])
 }
 
 fn footnote_id_from_prefixed_value(value: &str, prefixes: &[&str]) -> Option<String> {
@@ -768,7 +768,7 @@ fn footnote_id_from_prefixed_value(value: &str, prefixes: &[&str]) -> Option<Str
         value
             .strip_prefix(prefix)
             .map(footnote_id_suffix)
-            .filter(|id| id.chars().next().is_some_and(|ch| ch.is_ascii_digit()))
+            .filter(|id| !id.is_empty())
     })
 }
 

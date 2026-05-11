@@ -380,9 +380,10 @@ fn social_thread_candidate(
         .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
     let threads_body_selector =
         Selector::parse("div").map_err(|error| ChidoriError::Unknown(error.to_string()))?;
-    let threads_chrome_selector =
-        Selector::parse(r#"a[href^="/@"], time, button, header, footer, nav"#)
-            .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let threads_chrome_selector = Selector::parse(r#"time, button, header, footer, nav"#)
+        .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let threads_profile_link_selector = Selector::parse(r#"a[href^="/@"]"#)
+        .map_err(|error| ChidoriError::Unknown(error.to_string()))?;
 
     let mut output = String::from("<article class=\"chidori-social-thread\">");
     let mut post_count = 0;
@@ -397,6 +398,7 @@ fn social_thread_candidate(
             &bluesky_body_selector,
             &threads_body_selector,
             &threads_chrome_selector,
+            &threads_profile_link_selector,
         ) else {
             continue;
         };
@@ -470,6 +472,7 @@ fn social_thread_body<'a>(
     bluesky_body_selector: &Selector,
     threads_body_selector: &Selector,
     threads_chrome_selector: &Selector,
+    threads_profile_link_selector: &Selector,
 ) -> Option<ElementRef<'a>> {
     match site {
         SocialThreadSite::Bluesky => article.descendent_elements().find(|element| {
@@ -482,8 +485,41 @@ fn social_thread_body<'a>(
                 && nearest_social_article(*element, article_selector) == Some(article)
                 && !element_text(*element).is_empty()
                 && element.select(threads_chrome_selector).next().is_none()
+                && !is_threads_profile_only_block(*element, threads_profile_link_selector)
+                && !has_threads_profile_only_child(
+                    *element,
+                    threads_body_selector,
+                    threads_profile_link_selector,
+                )
         }),
     }
+}
+
+fn has_threads_profile_only_child(
+    element: ElementRef<'_>,
+    body_selector: &Selector,
+    profile_link_selector: &Selector,
+) -> bool {
+    element
+        .select(body_selector)
+        .any(|child| is_threads_profile_only_block(child, profile_link_selector))
+}
+
+fn is_threads_profile_only_block(
+    element: ElementRef<'_>,
+    profile_link_selector: &Selector,
+) -> bool {
+    let text = element_text(element);
+    let profile_text = normalize_text(
+        &element
+            .select(profile_link_selector)
+            .map(element_text)
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join(" "),
+    );
+
+    !profile_text.is_empty() && text == profile_text
 }
 
 fn nearest_social_article<'a>(

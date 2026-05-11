@@ -48,15 +48,26 @@ pub fn extract_metadata_with_content_title(
     let content_title = content_title
         .map(|title| title.trim().to_string())
         .filter(|title| !title.is_empty() && !is_placeholder_title(title));
+    let semantic_title = valid_title_candidate(semantic_h1_title(doc));
+    let html_title = valid_title_candidate(title(doc).map(|title| clean_title(&title, &site)));
+    let html_title_is_site_only = html_title
+        .as_deref()
+        .is_some_and(|title| is_site_only_title(title, &site, doc.url.host_str()));
     let title = valid_title_candidate(
         meta(doc, "property", "og:title")
             .or_else(|| meta(doc, "name", "twitter:title"))
             .or_else(|| schema_string(&schema_org_data, &["headline"]))
             .or_else(|| schema_article_string(&schema_org_data, "name")),
     )
+    .or_else(|| {
+        preferred_extracted_title(&html_title, content_title.clone(), html_title_is_site_only)
+    })
+    .or_else(|| {
+        preferred_extracted_title(&html_title, semantic_title.clone(), html_title_is_site_only)
+    })
+    .or(html_title)
     .or(content_title)
-    .or_else(|| valid_title_candidate(semantic_h1_title(doc)))
-    .or_else(|| valid_title_candidate(title(doc).map(|title| clean_title(&title, &site))))
+    .or(semantic_title)
     .or_else(|| h1_title(doc))
     .unwrap_or_default();
 
@@ -202,6 +213,98 @@ fn is_placeholder_title(title: &str) -> bool {
 
 fn valid_title_candidate(title: Option<String>) -> Option<String> {
     title.filter(|title| !is_placeholder_title(title))
+}
+
+fn preferred_extracted_title(
+    html_title: &Option<String>,
+    extracted_title: Option<String>,
+    html_title_is_site_only: bool,
+) -> Option<String> {
+    let extracted_title = extracted_title?;
+    match html_title {
+        Some(_) if html_title_is_site_only && is_substantive_title(&extracted_title) => {
+            Some(extracted_title)
+        }
+        Some(html_title) if !title_overlaps(html_title, &extracted_title) => None,
+        _ => Some(extracted_title),
+    }
+}
+
+fn is_substantive_title(title: &str) -> bool {
+    title_word_count(title) >= 2 || normalized_title_for_overlap(title).len() >= 12
+}
+
+fn is_site_only_title(title: &str, site: &str, host: Option<&str>) -> bool {
+    let title_normalized = normalized_title_for_overlap(title);
+    if title_normalized.is_empty() {
+        return false;
+    }
+    if !site.is_empty() && title_normalized == normalized_title_for_overlap(site) {
+        return true;
+    }
+
+    let Some(domain_stem) = host.and_then(domain_stem) else {
+        return false;
+    };
+    let domain_stem = domain_stem.to_ascii_lowercase();
+    let words = normalized_title_words(title);
+    !words.is_empty()
+        && words
+            .iter()
+            .all(|word| word == &domain_stem || matches!(word.as_str(), "site" | "home"))
+        && words.iter().any(|word| word == &domain_stem)
+}
+
+fn domain_stem(host: &str) -> Option<&str> {
+    host.trim_start_matches("www.").split('.').next()
+}
+
+fn title_overlaps(left: &str, right: &str) -> bool {
+    let left_normalized = normalized_title_for_overlap(left);
+    let right_normalized = normalized_title_for_overlap(right);
+    if left_normalized.is_empty() || right_normalized.is_empty() {
+        return false;
+    }
+    if left_normalized == right_normalized {
+        return true;
+    }
+
+    let shorter_len = left_normalized.len().min(right_normalized.len());
+    let longer_len = left_normalized.len().max(right_normalized.len());
+    let shorter_word_count = if left_normalized.len() <= right_normalized.len() {
+        title_word_count(left)
+    } else {
+        title_word_count(right)
+    };
+
+    (left_normalized.contains(&right_normalized) || right_normalized.contains(&left_normalized))
+        && shorter_len * 20 >= longer_len * 11
+        && (shorter_word_count >= 2 || shorter_len >= 12)
+}
+
+fn normalized_title_for_overlap(title: &str) -> String {
+    let mut normalized = String::new();
+    for ch in title.chars().filter(|ch| ch.is_alphanumeric()) {
+        normalized.extend(ch.to_lowercase());
+    }
+    normalized
+}
+
+fn title_word_count(title: &str) -> usize {
+    title
+        .split_whitespace()
+        .filter(|word| !word.is_empty())
+        .count()
+}
+
+fn normalized_title_words(title: &str) -> Vec<String> {
+    title
+        .split_whitespace()
+        .filter_map(|word| {
+            let normalized = normalized_title_for_overlap(word);
+            (!normalized.is_empty()).then_some(normalized)
+        })
+        .collect()
 }
 
 fn clean_title(title: &str, site: &str) -> String {
