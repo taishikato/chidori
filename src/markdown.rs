@@ -586,7 +586,7 @@ fn simple_table_markdown(fragment: &str, replacements: &[(String, String)]) -> O
                     }
 
                     Some(MarkdownTableCell {
-                        text: markdown_table_cell_text(cell, replacements),
+                        text: markdown_table_cell_text(cell, replacements)?,
                         is_header: cell.value().name().eq_ignore_ascii_case("th"),
                     })
                 })
@@ -621,16 +621,29 @@ fn simple_table_markdown(fragment: &str, replacements: &[(String, String)]) -> O
     Some(format!("\n{}\n", output.join("\n")))
 }
 
-fn markdown_table_cell_text(cell: ElementRef<'_>, replacements: &[(String, String)]) -> String {
-    let text = cell
-        .text()
+fn markdown_table_cell_text(
+    cell: ElementRef<'_>,
+    replacements: &[(String, String)],
+) -> Option<String> {
+    let markdown = html2md::parse_html(&cell.inner_html());
+    if markdown.lines().any(|line| {
+        let trimmed = line.trim_start();
+        is_backtick_fence(trimmed) || line.starts_with("    ")
+    }) {
+        return None;
+    }
+
+    let text = markdown
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
         .join(" ")
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
 
-    restore_replacements(text, replacements).replace('|', "\\|")
+    Some(restore_replacements(text, replacements).replace('|', "\\|"))
 }
 
 fn markdown_table_row<'a>(cells: impl IntoIterator<Item = &'a str>) -> String {
@@ -743,14 +756,20 @@ fn footnote_id_from_opening_tag(opening_tag: &str) -> Option<String> {
 }
 
 fn footnote_id_from_attr_value(value: &str) -> Option<String> {
-    ["#fn-", "#footnote-", "fnref-", "footnote-ref-", "fn-"]
-        .into_iter()
-        .find_map(|prefix| {
-            value
-                .strip_prefix(prefix)
-                .map(footnote_id_suffix)
-                .filter(|id| !id.is_empty())
-        })
+    if let Some((_, fragment)) = value.rsplit_once('#') {
+        return footnote_id_from_prefixed_value(fragment, &["fn-", "footnote-"]);
+    }
+
+    footnote_id_from_prefixed_value(value, &["fnref-", "footnote-ref-", "fn-"])
+}
+
+fn footnote_id_from_prefixed_value(value: &str, prefixes: &[&str]) -> Option<String> {
+    prefixes.iter().find_map(|prefix| {
+        value
+            .strip_prefix(prefix)
+            .map(footnote_id_suffix)
+            .filter(|id| id.chars().next().is_some_and(|ch| ch.is_ascii_digit()))
+    })
 }
 
 fn footnote_id_suffix(value: &str) -> String {

@@ -1,6 +1,6 @@
 # Extraction Parity Report
 
-Generated: 2026-05-11T08:33:30.766Z
+Generated: 2026-05-11T08:43:31.499Z
 
 Curated cases: 24
 Parity or better: 9

@@ -29,6 +29,27 @@ fn converts_simple_html_tables_to_markdown_tables() {
 }
 
 #[test]
+fn preserves_inline_links_inside_simple_html_table_cells() {
+    let html = r#"
+    <article>
+      <table>
+        <thead>
+          <tr><th>Name</th><th>Spec</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Alpha</td><td><a href="https://example.com/a">Spec A</a></td></tr>
+        </tbody>
+      </table>
+    </article>"#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(
+        markdown.contains("| Alpha | [Spec A](https://example.com/a) |"),
+        "{markdown}"
+    );
+}
+
+#[test]
 fn restores_specialized_elements_inside_markdown_table_cells() {
     let html = r#"<!doctype html>
     <html>
@@ -1452,6 +1473,32 @@ fn converts_footnotes_to_markdown_references() {
 }
 
 #[test]
+fn converts_path_fragment_footnote_links_to_markdown_references() {
+    let html = r##"
+    <article>
+      <p>The parser keeps cited claims<sup><a href="/post#fn-1">1</a></sup> readable.</p>
+      <section id="footnotes">
+        <ol>
+          <li id="fn-1"><p>Path fragment footnote text. <a class="footnote-backref" href="/post#fnref-1">↩</a></p></li>
+        </ol>
+      </section>
+    </article>"##;
+
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(
+        markdown.contains("cited claims[^1] readable."),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("[^1]: Path fragment footnote text."),
+        "{markdown}"
+    );
+    assert!(!markdown.contains("/post#fn-1"), "{markdown}");
+    assert!(!markdown.contains("↩"), "{markdown}");
+}
+
+#[test]
 fn converts_wordpress_block_footnotes_to_markdown_references() {
     let html = std::fs::read_to_string("tests/fixtures/reference/footnotes--wordpress-block.html")
         .unwrap();
@@ -1468,6 +1515,7 @@ fn ignores_non_footnotes_with_fn_like_attribute_values() {
     <article>
       <p>
         Inline label<sup class="fn-label">x</sup>
+        and id label<sup id="fn-label">label</sup>
         and anchor<sup><a href="#not-fn-1">not a footnote</a></sup>.
       </p>
     </article>"##;
@@ -1477,6 +1525,7 @@ fn ignores_non_footnotes_with_fn_like_attribute_values() {
     assert!(!markdown.contains("[^label]"));
     assert!(!markdown.contains("[^1]"));
     assert!(markdown.contains("x"));
+    assert!(markdown.contains("label"));
     assert!(markdown.contains("#not-fn-1"));
 }
 

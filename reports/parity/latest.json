@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-11T08:33:30.766Z",
+  "generatedAt": "2026-05-11T08:43:31.499Z",
   "corpus": "parity-corpus.json",
   "summary": {
     "total": 24,
@@ -56,13 +56,13 @@
       "commands": {
         "chidori": {
           "status": 0,
-          "elapsedMs": 82,
+          "elapsedMs": 48,
           "stderr": "",
           "parseError": ""
         },
         "reference": {
           "status": 0,
-          "elapsedMs": 258,
+          "elapsedMs": 266,
           "stderr": "",
           "parseError": ""
         }
@@ -120,7 +120,7 @@
         },
         "reference": {
           "status": 0,
-          "elapsedMs": 181,
+          "elapsedMs": 185,
           "stderr": "",
           "parseError": ""
         }
@@ -181,7 +181,7 @@
         },
         "reference": {
           "status": 0,
-          "elapsedMs": 175,
+          "elapsedMs": 176,
           "stderr": "",
           "parseError": ""
         }
@@ -233,13 +233,13 @@
       "commands": {
         "chidori": {
           "status": 0,
-          "elapsedMs": 19,
+          "elapsedMs": 18,
           "stderr": "",
           "parseError": ""
         },
         "reference": {
           "status": 0,
-          "elapsedMs": 161,
+          "elapsedMs": 154,
           "stderr": "",
           "parseError": ""
         }
@@ -291,13 +291,13 @@
       "commands": {
         "chidori": {
           "status": 0,
-          "elapsedMs": 16,
+          "elapsedMs": 15,
           "stderr": "",
           "parseError": ""
         },
         "reference": {
           "status": 0,
-          "elapsedMs": 154,
+          "elapsedMs": 152,
           "stderr": "",
           "parseError": ""
         }
@@ -357,7 +357,7 @@
         },
         "reference": {
           "status": 0,
-          "elapsedMs": 137,
+          "elapsedMs": 141,
           "stderr": "",
           "parseError": ""
         }
@@ -417,7 +417,7 @@
         },
         "reference": {
           "status": 0,
-          "elapsedMs": 134,
+          "elapsedMs": 138,
           "stderr": "",
           "parseError": ""
         }
@@ -477,7 +477,7 @@
         },
         "reference": {
           "status": 0,
-          "elapsedMs": 147,
+          "elapsedMs": 148,
           "stderr": "",
           "parseError": ""
         }
@@ -529,7 +529,7 @@
       "commands": {
         "chidori": {
           "status": 0,
-          "elapsedMs": 11,
+          "elapsedMs": 12,
           "stderr": "",
           "parseError": ""
         },
@@ -593,7 +593,7 @@
         },
         "reference": {
           "status": 0,
-          "elapsedMs": 150,
+          "elapsedMs": 149,
           "stderr": "",
           "parseError": ""
         }
@@ -651,7 +651,7 @@
         },
         "reference": {
           "status": 0,
-          "elapsedMs": 133,
+          "elapsedMs": 131,
           "stderr": "",
           "parseError": ""
         }
@@ -709,7 +709,7 @@
         },
         "reference": {
           "status": 0,
-          "elapsedMs": 134,
+          "elapsedMs": 133,
           "stderr": "",
           "parseError": ""
         }
@@ -769,7 +769,7 @@
         },
         "reference": {
           "status": 0,
-          "elapsedMs": 150,
+          "elapsedMs": 141,
           "stderr": "",
           "parseError": ""
         }
@@ -829,7 +829,7 @@
         },
         "reference": {
           "status": 0,
-          "elapsedMs": 136,
+          "elapsedMs": 135,
           "stderr": "",
           "parseError": ""
         }
@@ -885,13 +885,13 @@
       "commands": {
         "chidori": {
           "status": 0,
-          "elapsedMs": 11,
+          "elapsedMs": 9,
           "stderr": "",
           "parseError": ""
         },
         "reference": {
           "status": 0,
-          "elapsedMs": 142,
+          "elapsedMs": 144,
           "stderr": "",
           "parseError": ""
         }
@@ -948,13 +948,13 @@
       "commands": {
         "chidori": {
           "status": 0,
-          "elapsedMs": 13,
+          "elapsedMs": 12,
           "stderr": "",
           "parseError": ""
         },
         "reference": {
           "status": 0,
-          "elapsedMs": 149,
+          "elapsedMs": 151,
           "stderr": "",
           "parseError": ""
         }
@@ -1018,7 +1018,7 @@
         },
         "reference": {
           "status": 0,
-          "elapsedMs": 155,
+          "elapsedMs": 157,
           "stderr": "",
           "parseError": ""
         }
@@ -1081,7 +1081,7 @@
         },
         "reference": {
           "status": 0,
-          "elapsedMs": 146,
+          "elapsedMs": 144,
           "stderr": "",
           "parseError": ""
         }
@@ -1138,13 +1138,13 @@
       "commands": {
         "chidori": {
           "status": 0,
-          "elapsedMs": 11,
+          "elapsedMs": 10,
           "stderr": "",
           "parseError": ""
         },
         "reference": {
           "status": 0,
-          "elapsedMs": 142,
+          "elapsedMs": 143,
           "stderr": "",
           "parseError": ""
         }
@@ -1196,13 +1196,13 @@
       "commands": {
         "chidori": {
           "status": 0,
-          "elapsedMs": 10,
+          "elapsedMs": 9,
           "stderr": "",
           "parseError": ""
         },
         "reference": {
           "status": 0,
-          "elapsedMs": 141,
+          "elapsedMs": 147,
           "stderr": "",
           "parseError": ""
         }
@@ -1264,13 +1264,13 @@
       "commands": {
         "chidori": {
           "status": 0,
-          "elapsedMs": 12,
+          "elapsedMs": 13,
           "stderr": "",
           "parseError": ""
         },
         "reference": {
           "status": 0,
-          "elapsedMs": 159,
+          "elapsedMs": 161,
           "stderr": "",
           "parseError": ""
         }
@@ -1336,13 +1336,13 @@
       "commands": {
         "chidori": {
           "status": 0,
-          "elapsedMs": 12,
+          "elapsedMs": 13,
           "stderr": "",
           "parseError": ""
         },
         "reference": {
           "status": 0,
-          "elapsedMs": 168,
+          "elapsedMs": 177,
           "stderr": "",
           "parseError": ""
         }
@@ -1404,7 +1404,7 @@
         },
         "reference": {
           "status": 0,
-          "elapsedMs": 174,
+          "elapsedMs": 176,
           "stderr": "",
           "parseError": ""
         }
