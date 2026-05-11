@@ -1983,6 +1983,29 @@ fn removes_related_card_sections_even_when_footer_follows() {
 }
 
 #[test]
+fn cleaner_removes_related_sections_with_nested_cards_without_string_reparse_loss() {
+    let html = r#"
+    <article>
+      <p>Main text with <a href="/real">a real link</a> survives.</p>
+      <section class="grid">
+        <header><h2>Related articles</h2></header>
+        <div><article><a href="/a"><h3>Related One</h3><p>Teaser one.</p></a></article></div>
+        <div><article><a href="/b"><h3>Related Two</h3><p>Teaser two.</p></a></article></div>
+      </section>
+    </article>
+    "#;
+
+    let result = clean_html_with_report(html, &CleanOptions { no_images: false });
+
+    assert!(result.html.contains("Main text with"));
+    assert!(result.html.contains("href=\"/real\""));
+    assert!(!result.html.contains("Related One"));
+    assert!(result.removals.iter().any(|record| {
+        record.reason == "related-card-section" && record.text_preview.contains("Related articles")
+    }));
+}
+
+#[test]
 fn cleaner_treats_non_ascii_less_than_text_as_text() {
     let html =
         "<article><p>Keep this.</p><p>It<’s text, not a tag.</p><p>Use <— as text.</p></article>";

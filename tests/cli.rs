@@ -1697,6 +1697,49 @@ async fn json_debug_includes_cleanup_removal_reasons() {
 }
 
 #[tokio::test]
+async fn json_debug_cleanup_removals_include_text_preview() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/debug-removal-preview"))
+        .respond_with(html_response(
+            r#"
+            <html><body>
+              <article>
+                <h1>Article With Related Links</h1>
+                <p>The main article text should remain visible in the output.</p>
+                <section>
+                  <h2>Related articles</h2>
+                  <a href="/one">First related card</a>
+                  <a href="/two">Second related card</a>
+                </section>
+              </article>
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/debug-removal-preview", server.uri()))
+        .arg("--json")
+        .arg("--debug")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let removals = json["debug"]["removals"].as_array().unwrap();
+    assert!(removals.iter().any(|record| {
+        record["reason"] == "related-card-section"
+            && record["textPreview"]
+                .as_str()
+                .unwrap()
+                .contains("Related articles")
+    }));
+}
+
+#[tokio::test]
 async fn json_debug_reports_body_selector_after_low_word_retry() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

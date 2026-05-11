@@ -14,6 +14,8 @@ pub struct RemovalRecord {
     pub reason: String,
     pub selector: String,
     pub count: usize,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub text_preview: String,
 }
 
 #[derive(Debug, Clone)]
@@ -141,6 +143,7 @@ fn clean_html_inner(html: &str, options: &CleanOptions, remove_hidden: bool) -> 
     }
     unwrap_dom_javascript_links(&document);
     strip_dom_dangerous_attributes(&document);
+    remove_dom_related_card_sections(&document, &mut removals);
 
     let mut cleaned = serialize_body_inner(&document);
 
@@ -214,7 +217,31 @@ fn push_removal_if_changed(
         reason: reason.to_string(),
         selector: selector.to_string(),
         count: removed_element_count(before, after, selector).max(1),
+        text_preview: removed_text_preview(before, after, selector),
     });
+}
+
+fn removed_text_preview(before: &str, after: &str, selector: &str) -> String {
+    let Ok(selector) = Selector::parse(selector) else {
+        return String::new();
+    };
+    let before_dom = Html::parse_fragment(before);
+    let after_dom = Html::parse_fragment(after);
+    let after_texts = after_dom
+        .select(&selector)
+        .map(|node| normalize_preview_text(&node.text().collect::<Vec<_>>().join(" ")))
+        .collect::<Vec<_>>();
+
+    before_dom
+        .select(&selector)
+        .map(|node| text_preview_from_html(&node.html()))
+        .find(|preview| {
+            !preview.is_empty()
+                && !after_texts
+                    .iter()
+                    .any(|text| text.contains(preview.as_str()))
+        })
+        .unwrap_or_default()
 }
 
 fn remove_dom_selector(
@@ -234,6 +261,11 @@ fn remove_dom_selector(
     if count == 0 {
         return;
     }
+    let text_preview = nodes
+        .iter()
+        .map(text_preview_from_node)
+        .find(|preview| !preview.is_empty())
+        .unwrap_or_default();
     for node in nodes {
         node.detach();
     }
@@ -242,6 +274,7 @@ fn remove_dom_selector(
         reason: reason.to_string(),
         selector: report_selector.to_string(),
         count,
+        text_preview,
     });
 }
 
@@ -287,6 +320,11 @@ fn remove_dom_hidden_style_elements(
     if count == 0 {
         return;
     }
+    let text_preview = nodes
+        .iter()
+        .map(text_preview_from_node)
+        .find(|preview| !preview.is_empty())
+        .unwrap_or_default();
     for node in nodes {
         node.detach();
     }
@@ -295,7 +333,60 @@ fn remove_dom_hidden_style_elements(
         reason: "hidden-element".to_string(),
         selector: "[style]".to_string(),
         count,
+        text_preview,
     });
+}
+
+fn remove_dom_related_card_sections(
+    document: &kuchiki::NodeRef,
+    removals: &mut Vec<RemovalRecord>,
+) {
+    let Ok(matches) = document.select("section, div") else {
+        return;
+    };
+    let nodes = matches
+        .filter_map(|matched| {
+            is_related_card_section(&matched.as_node().to_string())
+                .then(|| matched.as_node().clone())
+        })
+        .collect::<Vec<_>>();
+    let count = nodes.len();
+    if count == 0 {
+        return;
+    }
+    let text_preview = nodes
+        .iter()
+        .map(text_preview_from_node)
+        .find(|preview| !preview.is_empty())
+        .unwrap_or_default();
+    for node in nodes {
+        node.detach();
+    }
+    removals.push(RemovalRecord {
+        step: "clean-html".to_string(),
+        reason: "related-card-section".to_string(),
+        selector: "section, div".to_string(),
+        count,
+        text_preview,
+    });
+}
+
+fn text_preview_from_html(html: &str) -> String {
+    let dom = Html::parse_fragment(html);
+    normalize_preview_text(&dom.root_element().text().collect::<Vec<_>>().join(" "))
+}
+
+fn text_preview_from_node(node: &kuchiki::NodeRef) -> String {
+    normalize_preview_text(&node.text_contents())
+}
+
+fn normalize_preview_text(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(200)
+        .collect()
 }
 
 fn is_hidden_style_value(value: &str) -> bool {
