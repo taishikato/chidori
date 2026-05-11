@@ -315,6 +315,7 @@ impl SpecializedHtml {
             footnotes: Vec::new(),
         };
         specialized.prefer_largest_srcset_images();
+        specialized.replace_figures();
         specialized.replace_math();
         specialized.replace_callouts();
         specialized.replace_footnotes();
@@ -364,6 +365,38 @@ impl SpecializedHtml {
                 output.push_str(opening_tag);
             }
             rest = &candidate[open_end + 1..];
+        }
+
+        output.push_str(rest);
+        self.html = output;
+    }
+
+    fn replace_figures(&mut self) {
+        let source = std::mem::take(&mut self.html);
+        let mut output = String::with_capacity(source.len());
+        let mut rest = source.as_str();
+
+        while let Some(index) = find_opening_tag(rest, "figure") {
+            output.push_str(&rest[..index]);
+            let candidate = &rest[index..];
+            let Some(open_end) = opening_tag_end(candidate) else {
+                output.push_str(candidate);
+                self.html = output;
+                return;
+            };
+            let Some(close_end) = find_matching_close(candidate, "figure", open_end + 1) else {
+                output.push_str(candidate);
+                self.html = output;
+                return;
+            };
+            let fragment = &candidate[..close_end];
+            if let Some(markdown) = figure_markdown(fragment) {
+                let placeholder = self.push_replacement(markdown);
+                output.push_str(&placeholder);
+            } else {
+                output.push_str(fragment);
+            }
+            rest = &candidate[close_end..];
         }
 
         output.push_str(rest);
@@ -472,7 +505,10 @@ impl SpecializedHtml {
             };
             let fragment = &candidate[..close_end];
 
-            if let Some(markdown) = simple_table_markdown(fragment, &self.replacements) {
+            if let Some(markdown) = layout_table_markdown(fragment, &self.replacements) {
+                let placeholder = self.push_replacement(markdown);
+                output.push_str(&placeholder);
+            } else if let Some(markdown) = simple_table_markdown(fragment, &self.replacements) {
                 let placeholder = self.push_replacement(markdown);
                 output.push_str(&placeholder);
             } else {
@@ -540,6 +576,34 @@ impl SpecializedHtml {
     }
 }
 
+fn figure_markdown(fragment: &str) -> Option<String> {
+    let dom = Html::parse_fragment(fragment);
+    let img_selector = Selector::parse("img").unwrap();
+    let caption_selector = Selector::parse("figcaption").unwrap();
+    let img = dom.select(&img_selector).next()?;
+    let alt = img.value().attr("alt").unwrap_or("");
+    let src = img
+        .value()
+        .attr("srcset")
+        .and_then(largest_srcset_candidate)
+        .or_else(|| img.value().attr("src"))?;
+    if is_dangerous_url(src) {
+        return None;
+    }
+    let caption = dom
+        .select(&caption_selector)
+        .next()
+        .map(|caption| caption.text().collect::<Vec<_>>().join(" "))
+        .map(|text| text.split_whitespace().collect::<Vec<_>>().join(" "))
+        .unwrap_or_default();
+
+    if caption.is_empty() {
+        Some(format!("![{}]({})", alt, src))
+    } else {
+        Some(format!("![{}]({})\n\n{}", alt, src, caption))
+    }
+}
+
 fn restore_replacements(mut markdown: String, replacements: &[(String, String)]) -> String {
     if replacements.is_empty() {
         return markdown;
@@ -556,6 +620,31 @@ fn restore_replacements(mut markdown: String, replacements: &[(String, String)])
     }
 
     markdown
+}
+
+fn layout_table_markdown(fragment: &str, replacements: &[(String, String)]) -> Option<String> {
+    let dom = Html::parse_fragment(fragment);
+    let table_selector = Selector::parse("table").unwrap();
+    let cell_selector = Selector::parse("td, th").unwrap();
+    let table = dom.select(&table_selector).next()?;
+    if table.inner_html().to_ascii_lowercase().contains("<table") {
+        return None;
+    }
+    let cells = table.select(&cell_selector).collect::<Vec<_>>();
+    if cells.len() != 1 {
+        return None;
+    }
+    if cells[0].value().name().eq_ignore_ascii_case("th") {
+        return None;
+    }
+    let markdown = html2md::parse_html(&cells[0].inner_html())
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let markdown = restore_replacements(markdown, replacements);
+    (!markdown.is_empty()).then_some(format!("\n{}\n", markdown))
 }
 
 struct MarkdownTableCell {

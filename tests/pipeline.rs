@@ -29,6 +29,35 @@ fn converts_simple_html_tables_to_markdown_tables() {
 }
 
 #[test]
+fn markdown_preserves_figcaption_and_unwraps_single_cell_layout_tables() {
+    let html =
+        std::fs::read_to_string("tests/fixtures/reference/markdown--figure-and-layout-table.html")
+            .unwrap();
+    let markdown = html_to_markdown(&html, &MarkdownOptions { max_chars: None });
+
+    assert!(
+        markdown
+            .contains("![Architecture diagram](/large.png)\n\nFigure 1. The extraction pipeline."),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("Figure 1. The extraction pipeline."),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("This is a layout table cell that should become ordinary prose."),
+        "{markdown}"
+    );
+    assert!(markdown.contains("| Name | Value |"), "{markdown}");
+    assert!(markdown.contains("| Alpha | 10 |"), "{markdown}");
+    assert!(
+        !markdown.contains("|This is a layout table cell"),
+        "{markdown}"
+    );
+    assert!(!markdown.contains("<td>"), "{markdown}");
+}
+
+#[test]
 fn preserves_inline_links_inside_simple_html_table_cells() {
     let html = r#"
     <article>
