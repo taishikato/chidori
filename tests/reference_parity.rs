@@ -344,6 +344,24 @@ fn video_watch_reference_uses_only_primary_watch_content() {
 }
 
 #[test]
+fn leetcode_problem_reference_extracts_problem_statement() {
+    let markdown = fixture_to_markdown(
+        "domain--leetcode-problem.html",
+        "https://leetcode.com/problems/two-sum/",
+    );
+
+    assert_contains_all(
+        &markdown,
+        &[
+            "# 1. Two Sum",
+            "Given an array of integers nums",
+            "Input: nums = [2,7,11,15], target = 9",
+        ],
+    );
+    assert_contains_none(&markdown, &["Problems Discuss Store", "Similar Questions"]);
+}
+
+#[test]
 fn reddit_reference_reply_is_nested_once() {
     let markdown = fixture_to_markdown(
         "domain--reddit-discussion.html",

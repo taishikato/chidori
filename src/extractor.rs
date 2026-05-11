@@ -277,6 +277,8 @@ fn known_site_content_candidate(
         "article, .body.markup, .available-content"
     } else if host_matches(host, "discourse.org") || host_matches(host, "discourse.group") {
         ".topic-post .cooked, #post_1 .cooked, article .cooked"
+    } else if host_matches(host, "leetcode.com") {
+        r#"[data-track-load="description_content"]"#
     } else {
         return Ok(None);
     };
