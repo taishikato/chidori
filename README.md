@@ -10,6 +10,68 @@ npx chidori-fetch https://example.com
 
 `chidori` fetches a URL, extracts the main readable content, removes page noise, and prints Markdown to stdout by default. Logs and errors go to stderr so AI agents and shell scripts can safely pipe stdout into prompts, files, or other tools.
 
+## Quick demo
+
+Web pages are built for browsers. Agents usually need the article, not the page
+chrome around it.
+
+```html
+<body>
+  <nav>Docs Pricing Log in</nav>
+  <article>
+    <h1>How Coffee Cools</h1>
+    <p>Coffee cools following Newton's law of cooling.</p>
+    <pre><code>cargo test</code></pre>
+  </article>
+  <aside>Related posts, ads, newsletter forms...</aside>
+</body>
+```
+
+```bash
+npx chidori-fetch https://example.com/coffee-cooling
+```
+
+````md
+# How Coffee Cools
+
+Coffee cools following Newton's law of cooling.
+
+```
+cargo test
+```
+````
+
+That output can go straight into an agent prompt, a RAG ingestion job, a note, or
+another shell command:
+
+```bash
+chidori https://example.com/article | llm "summarize this for a code review"
+chidori https://example.com/article --json | jq -r '.title, .markdown'
+```
+
+## Why agents use it
+
+- **Pipeable by default:** Markdown goes to stdout. Logs and errors go to
+  stderr, so scripts can trust the output stream.
+- **Readable content first:** `chidori` strips navigation, footers, forms,
+  hidden content, related links, script noise, and common social/page chrome.
+- **Agent-friendly Markdown:** code blocks, links, images, simple tables,
+  footnotes, math, and callouts are preserved in text form where possible.
+- **Useful metadata:** `--json` returns the final URL, canonical URL, title,
+  description, domain, language, meta tags, schema.org data, word count, and the
+  extracted Markdown.
+- **Fast local CLI:** it is a Rust binary with no hosted service in the loop.
+  JavaScript-heavy pages can opt into your own renderer with `--render=auto`.
+
+## How it is different
+
+| Tool | What you usually get |
+| --- | --- |
+| `curl` | Raw HTML, scripts, navigation, and layout markup. |
+| Browser automation | Accurate rendering, but heavier and harder to pipe through shell workflows. |
+| Readability libraries | Good extraction primitives, usually embedded inside another app or runtime. |
+| `chidori` | One command that fetches, extracts, cleans, converts to Markdown, and keeps stdout safe for agents. |
+
 ## Installation
 
 ```bash
@@ -89,6 +151,8 @@ CHIDORI_RENDER_COMMAND=/absolute/path/to/render-page.mjs chidori https://example
 The renderer should write only HTML to stdout. Write logs and errors to stderr so
 `chidori` can safely read stdout as the rendered document.
 
-## Why
+## Design goals
 
-AI agents need web pages as clean, pipeable Markdown. `chidori` is built in Rust for fast CLI startup and predictable shell behavior in automated workflows.
+AI agents need web pages as clean, pipeable Markdown. `chidori` is built for fast
+CLI startup, deterministic shell behavior, and extraction that is easy to debug
+when a page does something strange.
