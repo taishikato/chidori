@@ -1817,9 +1817,10 @@ fn structured_content_candidate(
     doc: &ParsedDocument,
     current_word_count: usize,
 ) -> Result<Option<String>, ChidoriError> {
-    let Some(text) = crate::metadata::structured_content_text(doc) else {
+    let Some(content) = crate::metadata::structured_content(doc) else {
         return Ok(None);
     };
+    let text = structured_content_plain_text(&content);
     let structured_word_count = text.split_whitespace().count();
     if structured_word_count == 0 || structured_word_count * 2 <= current_word_count * 3 {
         return Ok(None);
@@ -1829,7 +1830,32 @@ fn structured_content_candidate(
         return Ok(Some(html));
     }
 
-    Ok(Some(encode_text(&text).to_string()))
+    Ok(Some(structured_content_fallback_html(&content)))
+}
+
+fn structured_content_plain_text(content: &crate::metadata::StructuredContent) -> String {
+    match content.format {
+        crate::metadata::StructuredContentFormat::PlainText => normalize_text(&content.text),
+        crate::metadata::StructuredContentFormat::Html => {
+            let fragment = scraper::Html::parse_fragment(&content.text);
+            let text =
+                normalize_text(&fragment.root_element().text().collect::<Vec<_>>().join(" "));
+            if text.is_empty() {
+                normalize_text(&content.text)
+            } else {
+                text
+            }
+        }
+    }
+}
+
+fn structured_content_fallback_html(content: &crate::metadata::StructuredContent) -> String {
+    match content.format {
+        crate::metadata::StructuredContentFormat::PlainText => {
+            encode_text(&content.text).to_string()
+        }
+        crate::metadata::StructuredContentFormat::Html => content.text.to_string(),
+    }
 }
 
 fn smallest_element_containing_text(

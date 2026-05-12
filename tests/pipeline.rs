@@ -1418,6 +1418,79 @@ fn uses_structured_body_when_visible_body_has_no_words() {
 }
 
 #[test]
+fn uses_job_posting_description_when_visible_body_has_no_words() {
+    let html = r#"
+    <html>
+      <head>
+        <script type="application/ld+json">
+          {
+            "@context": "https://schema.org",
+            "@type": "JobPosting",
+            "title": "Fullstack Software Engineer",
+            "description": "<h2><strong>About the Role</strong></h2><p>Build travel commerce engines for APAC partners with Scala and React.</p><ul><li><p>Design and operate full-stack APIs for high-scale partnerships.</p></li></ul>"
+          }
+        </script>
+      </head>
+      <body>
+        <div id="root"><div class="spinner"></div></div>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://jobs.example.com/post").unwrap());
+
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("<h2><strong>About the Role</strong></h2>"));
+    assert!(main.contains("Build travel commerce engines"));
+    assert!(!main.contains("spinner"));
+}
+
+#[test]
+fn preserves_angle_brackets_in_plain_structured_body_fallback() {
+    let html = r#"
+    <html>
+      <head>
+        <script type="application/ld+json">
+          {
+            "@context": "https://schema.org",
+            "@type": "Article",
+            "articleBody": "Use Vec<T> and Result<T, E> when documenting Rust generics. This structured article text is long enough to become the fallback content for agents reading a schema-only page."
+          }
+        </script>
+      </head>
+      <body></body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("Vec&lt;T&gt;"));
+    assert!(main.contains("Result&lt;T, E&gt;"));
+}
+
+#[test]
+fn preserves_literal_html_tags_in_plain_structured_body_fallback() {
+    let html = r#"
+    <html>
+      <head>
+        <script type="application/ld+json">
+          {
+            "@context": "https://schema.org",
+            "@type": "Article",
+            "articleBody": "Use <p> tags and escape <div> examples when documenting HTML. This structured article text is long enough to become fallback content for agents reading schema-only pages."
+          }
+        </script>
+      </head>
+      <body></body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("Use &lt;p&gt; tags"));
+    assert!(main.contains("escape &lt;div&gt; examples"));
+}
+
+#[test]
 fn extracts_hacker_news_listing_items_as_readable_content() {
     let html = std::fs::read_to_string("tests/fixtures/reference/domain--hacker-news-listing.html")
         .unwrap();

@@ -31,6 +31,18 @@ pub struct MetaTag {
     pub content: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StructuredContentFormat {
+    PlainText,
+    Html,
+}
+
+#[derive(Debug, Clone)]
+pub struct StructuredContent {
+    pub text: String,
+    pub format: StructuredContentFormat,
+}
+
 pub fn extract_metadata(doc: &ParsedDocument) -> Metadata {
     extract_metadata_with_content_title(doc, None)
 }
@@ -124,10 +136,24 @@ pub fn title_from_html_fragment(html: &str) -> Option<String> {
 }
 
 pub fn structured_content_text(doc: &ParsedDocument) -> Option<String> {
+    structured_content(doc).map(|content| content.text)
+}
+
+pub fn structured_content(doc: &ParsedDocument) -> Option<StructuredContent> {
     let schema = extract_schema_org_data(doc);
     schema_string(&schema, &["articleBody"])
         .or_else(|| schema_article_string(&schema, "text"))
-        .filter(|text| !text.trim().is_empty())
+        .map(|text| StructuredContent {
+            text,
+            format: StructuredContentFormat::PlainText,
+        })
+        .or_else(|| {
+            schema_type_string(&schema, "JobPosting", "description").map(|text| StructuredContent {
+                text,
+                format: StructuredContentFormat::Html,
+            })
+        })
+        .filter(|content| !content.text.trim().is_empty())
 }
 
 pub fn extract_schema_org_data(doc: &ParsedDocument) -> Option<Value> {
