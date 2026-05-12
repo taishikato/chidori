@@ -84,6 +84,51 @@ fn markdown_preserves_links_and_footnote_refs_inside_figcaptions() {
 }
 
 #[test]
+fn markdown_preserves_all_images_inside_figure() {
+    let html = r#"
+    <article>
+      <figure>
+        <img alt="Before" src="/before.png">
+        <img alt="After" src="/after.png">
+        <figcaption>Before and after comparison.</figcaption>
+      </figure>
+    </article>"#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("![Before](/before.png)"), "{markdown}");
+    assert!(markdown.contains("![After](/after.png)"), "{markdown}");
+    assert!(
+        markdown.contains("Before and after comparison."),
+        "{markdown}"
+    );
+}
+
+#[test]
+fn markdown_keeps_caption_when_unwrapping_single_cell_layout_table() {
+    let html = r#"
+    <article>
+      <table>
+        <caption>Important context for the table.</caption>
+        <tbody>
+          <tr>
+            <td>This layout cell should become prose.</td>
+          </tr>
+        </tbody>
+      </table>
+    </article>"#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(
+        markdown.contains("Important context for the table."),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("This layout cell should become prose."),
+        "{markdown}"
+    );
+}
+
+#[test]
 fn preserves_inline_links_inside_simple_html_table_cells() {
     let html = r#"
     <article>
@@ -595,6 +640,24 @@ fn dom_byline_strips_trailing_published_and_follow_text() {
     let metadata = extract_metadata(&doc);
 
     assert_eq!(metadata.author, "Ada Lovelace");
+}
+
+#[test]
+fn dom_byline_preserves_in_inside_organization_author_names() {
+    let html = r#"<!doctype html>
+    <html>
+      <body>
+        <article>
+          <h1>Article Title</h1>
+          <p class="byline">By Center for Women in Technology</p>
+          <p>Hello world.</p>
+        </article>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.author, "Center for Women in Technology");
 }
 
 #[test]

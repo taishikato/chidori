@@ -22,6 +22,7 @@
   ],
   "scripts": {
     "build": "cargo build --release",
+    "clean": "cargo clean",
     "format": "cargo fmt --all",
     "format:check": "cargo fmt --all -- --check",
     "lint": "cargo clippy --all-targets --all-features -- -D warnings",

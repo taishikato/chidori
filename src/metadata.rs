@@ -473,9 +473,9 @@ fn strip_byline_prefix(value: &str) -> &str {
 fn trim_trailing_byline_noise(value: &str) -> &str {
     let lower = value.to_ascii_lowercase();
     let mut end = value.len();
-    for marker in [" published ", " updated ", " posted ", " on ", " in "] {
+    for marker in [" published ", " updated ", " posted ", " on "] {
         if let Some(index) = lower.find(marker) {
-            if marker.trim() == "on" || marker.trim() == "in" {
+            if marker.trim() == "on" {
                 let before = value[..index].split_whitespace().count();
                 if before >= 2 {
                     end = end.min(index);

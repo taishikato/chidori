@@ -580,7 +580,29 @@ fn figure_markdown(fragment: &str) -> Option<String> {
     let dom = Html::parse_fragment(fragment);
     let img_selector = Selector::parse("img").unwrap();
     let caption_selector = Selector::parse("figcaption").unwrap();
-    let img = dom.select(&img_selector).next()?;
+    let images = dom
+        .select(&img_selector)
+        .map(image_markdown)
+        .collect::<Option<Vec<_>>>()?;
+    if images.is_empty() {
+        return None;
+    }
+    let caption = dom
+        .select(&caption_selector)
+        .next()
+        .map(|caption| inline_markdown_from_html(&caption.inner_html()))
+        .unwrap_or_default();
+
+    let mut parts = images;
+    if caption.is_empty() {
+        Some(parts.join("\n\n"))
+    } else {
+        parts.push(caption);
+        Some(parts.join("\n\n"))
+    }
+}
+
+fn image_markdown(img: ElementRef<'_>) -> Option<String> {
     let alt = img.value().attr("alt").unwrap_or("");
     let src = img
         .value()
@@ -590,24 +612,16 @@ fn figure_markdown(fragment: &str) -> Option<String> {
     if is_dangerous_url(src) {
         return None;
     }
-    let caption = dom
-        .select(&caption_selector)
-        .next()
-        .map(|caption| {
-            html2md::parse_html(&replace_footnote_refs(&caption.inner_html()))
-                .lines()
-                .map(str::trim)
-                .filter(|line| !line.is_empty())
-                .collect::<Vec<_>>()
-                .join(" ")
-        })
-        .unwrap_or_default();
+    Some(format!("![{}]({})", alt, src))
+}
 
-    if caption.is_empty() {
-        Some(format!("![{}]({})", alt, src))
-    } else {
-        Some(format!("![{}]({})\n\n{}", alt, src, caption))
-    }
+fn inline_markdown_from_html(html: &str) -> String {
+    html2md::parse_html(&replace_footnote_refs(html))
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn restore_replacements(mut markdown: String, replacements: &[(String, String)]) -> String {
@@ -632,6 +646,7 @@ fn layout_table_markdown(fragment: &str, replacements: &[(String, String)]) -> O
     let dom = Html::parse_fragment(fragment);
     let table_selector = Selector::parse("table").unwrap();
     let cell_selector = Selector::parse("td, th").unwrap();
+    let caption_selector = Selector::parse("caption").unwrap();
     let table = dom.select(&table_selector).next()?;
     if table.inner_html().to_ascii_lowercase().contains("<table") {
         return None;
@@ -649,6 +664,16 @@ fn layout_table_markdown(fragment: &str, replacements: &[(String, String)]) -> O
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
         .join("\n\n");
+    let caption = table
+        .select(&caption_selector)
+        .next()
+        .map(|caption| inline_markdown_from_html(&caption.inner_html()))
+        .unwrap_or_default();
+    let markdown = if caption.is_empty() {
+        markdown
+    } else {
+        format!("{caption}\n\n{markdown}")
+    };
     let markdown = restore_replacements(markdown, replacements);
     (!markdown.is_empty()).then_some(format!("\n{}\n", markdown))
 }
