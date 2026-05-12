@@ -38,6 +38,8 @@ const ARTICLE_RETRY_PROTECTION_MIN_WORDS: usize = 10;
 
 #[derive(Debug, Clone)]
 struct Candidate {
+    diagnostic_id: usize,
+    diagnostic_pass: String,
     score: isize,
     selector_index: usize,
     selector: String,
@@ -58,6 +60,8 @@ pub struct ExtractedContent {
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContentCandidateDiagnostic {
+    pub id: usize,
+    pub pass: String,
     pub selector: String,
     pub score: isize,
     pub word_count: usize,
@@ -237,16 +241,29 @@ fn extract_main_content_inner(
 
     let mut fallback_steps = Vec::new();
     let mut candidate_diagnostics = Vec::new();
-    let (mut best_candidate, primary_candidates) =
-        best_candidate_for_selectors(doc, PRIMARY_ENTRY_SELECTORS, &selectors, false)?;
+    let mut next_candidate_id = 0;
+    let (mut best_candidate, primary_candidates) = best_candidate_for_selectors(
+        doc,
+        PRIMARY_ENTRY_SELECTORS,
+        &selectors,
+        false,
+        "primary",
+        &mut next_candidate_id,
+    )?;
     candidate_diagnostics.push(primary_candidates);
 
     if best_candidate
         .as_ref()
         .is_none_or(|candidate| candidate.word_count < LOW_WORD_COUNT_RETRY_THRESHOLD)
     {
-        let (hidden_candidate, hidden_candidates) =
-            best_candidate_for_selectors(doc, PRIMARY_ENTRY_SELECTORS, &selectors, true)?;
+        let (hidden_candidate, hidden_candidates) = best_candidate_for_selectors(
+            doc,
+            PRIMARY_ENTRY_SELECTORS,
+            &selectors,
+            true,
+            "hidden",
+            &mut next_candidate_id,
+        )?;
         candidate_diagnostics.push(hidden_candidates);
         if let Some(hidden_candidate) = hidden_candidate {
             let previous_word_count = best_candidate
@@ -279,8 +296,14 @@ fn extract_main_content_inner(
     }
 
     if best_candidate.is_none() {
-        let (body_candidate, body_candidates) =
-            best_candidate_for_selectors(doc, BODY_FALLBACK_SELECTORS, &selectors, false)?;
+        let (body_candidate, body_candidates) = best_candidate_for_selectors(
+            doc,
+            BODY_FALLBACK_SELECTORS,
+            &selectors,
+            false,
+            "body-fallback",
+            &mut next_candidate_id,
+        )?;
         candidate_diagnostics.push(body_candidates);
         best_candidate = body_candidate;
     }
@@ -299,6 +322,8 @@ fn extract_main_content_inner(
                     reason: "structured content was more complete".to_string(),
                 });
             best_candidate = Some(Candidate {
+                diagnostic_id: next_candidate_id,
+                diagnostic_pass: "schema-org".to_string(),
                 score: candidate.score,
                 selector_index: candidate.selector_index,
                 selector: "schema-org".to_string(),
@@ -315,13 +340,25 @@ fn extract_main_content_inner(
             .filter(|candidate| candidate.word_count < LOW_WORD_COUNT_RETRY_THRESHOLD)
             .cloned()
         {
-            let (broad_retry_candidate, broad_candidates) =
-                best_candidate_for_selectors(doc, BROAD_RETRY_SELECTORS, &selectors, false)?;
+            let (broad_retry_candidate, broad_candidates) = best_candidate_for_selectors(
+                doc,
+                BROAD_RETRY_SELECTORS,
+                &selectors,
+                false,
+                "broad-retry",
+                &mut next_candidate_id,
+            )?;
             candidate_diagnostics.push(broad_candidates);
             let broad_retry_candidate = broad_retry_candidate
                 .filter(|broad_candidate| should_retry_with_body(&candidate, broad_candidate));
-            let (body_retry_candidate, body_candidates) =
-                best_candidate_for_selectors(doc, BODY_FALLBACK_SELECTORS, &selectors, false)?;
+            let (body_retry_candidate, body_candidates) = best_candidate_for_selectors(
+                doc,
+                BODY_FALLBACK_SELECTORS,
+                &selectors,
+                false,
+                "body-retry",
+                &mut next_candidate_id,
+            )?;
             candidate_diagnostics.push(body_candidates);
             let body_retry_candidate = body_retry_candidate
                 .filter(|body_candidate| should_retry_with_body(&candidate, body_candidate));
@@ -362,7 +399,7 @@ fn extract_main_content_inner(
         push_candidate_diagnostics(
             diagnostics,
             &candidate_diagnostics,
-            Some(candidate.selector.as_str()),
+            Some(candidate.diagnostic_id),
         );
         Ok(ExtractedContent {
             html: candidate.html,
@@ -1909,6 +1946,8 @@ fn best_candidate_for_selectors(
     raw_selectors: &[&str],
     selectors: &ScoringSelectors,
     include_hidden: bool,
+    diagnostic_pass: &str,
+    next_candidate_id: &mut usize,
 ) -> Result<(Option<Candidate>, Vec<Candidate>), ChidoriError> {
     let mut best_candidate: Option<Candidate> = None;
     let mut candidates = Vec::new();
@@ -1924,6 +1963,8 @@ fn best_candidate_for_selectors(
             }
             let score = selector_priority(raw_selectors.len(), selector_index) + content_score;
             let candidate = Candidate {
+                diagnostic_id: *next_candidate_id,
+                diagnostic_pass: diagnostic_pass.to_string(),
                 score,
                 selector_index,
                 selector: (*raw_selector).to_string(),
@@ -1931,6 +1972,7 @@ fn best_candidate_for_selectors(
                 content_block_count,
                 html: element.html(),
             };
+            *next_candidate_id += 1;
             if best_candidate.as_ref().is_none_or(|best_candidate| {
                 candidate.score > best_candidate.score
                     || (candidate.score == best_candidate.score
@@ -1951,15 +1993,17 @@ fn best_candidate_for_selectors(
 fn push_candidate_diagnostics(
     diagnostics: &mut ExtractionDiagnostics,
     candidate_sets: &[Vec<Candidate>],
-    selected_selector: Option<&str>,
+    selected_id: Option<usize>,
 ) {
     for candidate in candidate_sets.iter().flatten() {
         diagnostics.candidates.push(ContentCandidateDiagnostic {
+            id: candidate.diagnostic_id,
+            pass: candidate.diagnostic_pass.clone(),
             selector: candidate.selector.clone(),
             score: candidate.score,
             word_count: candidate.word_count,
             content_block_count: candidate.content_block_count,
-            decision: if Some(candidate.selector.as_str()) == selected_selector {
+            decision: if Some(candidate.diagnostic_id) == selected_id {
                 CandidateDecision::Selected
             } else {
                 CandidateDecision::Rejected

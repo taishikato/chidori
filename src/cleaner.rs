@@ -350,6 +350,7 @@ fn remove_dom_related_card_sections(
                 .then(|| matched.as_node().clone())
         })
         .collect::<Vec<_>>();
+    let nodes = deepest_nodes(nodes);
     let count = nodes.len();
     if count == 0 {
         return;
@@ -369,6 +370,18 @@ fn remove_dom_related_card_sections(
         count,
         text_preview,
     });
+}
+
+fn deepest_nodes(nodes: Vec<kuchiki::NodeRef>) -> Vec<kuchiki::NodeRef> {
+    nodes
+        .iter()
+        .filter(|node| !nodes.iter().any(|other| node_contains(node, other)))
+        .cloned()
+        .collect()
+}
+
+fn node_contains(parent: &kuchiki::NodeRef, child: &kuchiki::NodeRef) -> bool {
+    parent != child && child.ancestors().any(|ancestor| ancestor == *parent)
 }
 
 fn text_preview_from_html(html: &str) -> String {

@@ -437,6 +437,26 @@ fn metadata_prefers_scoped_article_byline_over_global_author_chrome() {
 }
 
 #[test]
+fn metadata_prefers_dateline_over_earlier_article_event_time() {
+    let html = r#"<!doctype html>
+    <html>
+      <body>
+        <article>
+          <h1>Timeline Article</h1>
+          <p>The archive opened on <time datetime="1970-01-01T00:00:00Z">January 1, 1970</time>.</p>
+          <p class="dateline">Published <time datetime="2026-05-12T08:00:00Z">May 12, 2026</time></p>
+          <p>The article body starts after the dateline.</p>
+        </article>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/timeline").unwrap());
+
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.published, "2026-05-12T08:00:00Z");
+}
+
+#[test]
 fn placeholder_social_title_yields_to_extracted_content_title() {
     let html = r#"<!doctype html>
     <html>
@@ -2052,6 +2072,30 @@ fn cleaner_removes_related_sections_with_nested_cards_without_string_reparse_los
     assert!(!result.html.contains("Related One"));
     assert!(result.removals.iter().any(|record| {
         record.reason == "related-card-section" && record.text_preview.contains("Related articles")
+    }));
+}
+
+#[test]
+fn cleaner_keeps_article_text_when_related_cards_share_parent_wrapper() {
+    let html = r#"
+    <article>
+      <div class="article-shell">
+        <p>Main analysis that must remain after related cards are removed.</p>
+        <section>
+          <h2>Related articles</h2>
+          <a href="/one"><h3>Related One</h3><p>Teaser one.</p></a>
+          <a href="/two"><h3>Related Two</h3><p>Teaser two.</p></a>
+        </section>
+      </div>
+    </article>
+    "#;
+
+    let result = clean_html_with_report(html, &CleanOptions { no_images: false });
+
+    assert!(result.html.contains("Main analysis that must remain"));
+    assert!(!result.html.contains("Related One"));
+    assert!(result.removals.iter().any(|record| {
+        record.reason == "related-card-section" && record.selector == "section, div"
     }));
 }
 

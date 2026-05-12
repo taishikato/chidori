@@ -1656,6 +1656,48 @@ async fn json_debug_includes_candidate_list_and_fallback_attempts() {
 }
 
 #[tokio::test]
+async fn json_debug_marks_only_the_actual_selected_candidate() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/debug-selected-candidate"))
+        .respond_with(html_response(
+            r#"
+            <html><body>
+              <article><h1>Stub</h1><p>Stub.</p></article>
+              <article hidden>
+                <h1>Hidden Complete Article</h1>
+                <p>This hidden article has the complete story and enough words to be chosen.</p>
+                <p>The visible article is only a placeholder, so diagnostics should mark only this candidate selected.</p>
+                <p>Duplicate selector names must not create duplicate selected candidates.</p>
+              </article>
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/debug-selected-candidate", server.uri()))
+        .arg("--json")
+        .arg("--debug")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let candidates = json["debug"]["candidates"].as_array().unwrap();
+    let selected_articles = candidates
+        .iter()
+        .filter(|candidate| candidate["selector"] == "article")
+        .filter(|candidate| candidate["decision"] == "selected")
+        .collect::<Vec<_>>();
+
+    assert_eq!(selected_articles.len(), 1, "{candidates:#?}");
+    assert!(selected_articles[0]["wordCount"].as_u64().unwrap() > 20);
+}
+
+#[tokio::test]
 async fn json_debug_includes_cleanup_removal_reasons() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

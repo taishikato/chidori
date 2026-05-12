@@ -350,12 +350,12 @@ fn time_datetime(doc: &ParsedDocument) -> Option<String> {
 fn published_near_h1(doc: &ParsedDocument) -> Option<String> {
     published_datetime_for_selector(
         doc,
-        r#"article time[datetime], article .date time[datetime], article .dateline time[datetime], article .published time[datetime], article [class*="date"] time[datetime]"#,
+        r#"article .date time[datetime], article .dateline time[datetime], article .published time[datetime], article [class*="date"] time[datetime]"#,
     )
     .or_else(|| {
         published_datetime_for_selector(
             doc,
-            r#"main time[datetime], main .date time[datetime], main .dateline time[datetime], main .published time[datetime], main [class*="date"] time[datetime]"#,
+            r#"main .date time[datetime], main .dateline time[datetime], main .published time[datetime], main [class*="date"] time[datetime]"#,
         )
     })
     .or_else(|| {
@@ -364,6 +364,8 @@ fn published_near_h1(doc: &ParsedDocument) -> Option<String> {
             r#".date time[datetime], .dateline time[datetime], .published time[datetime], [class*="date"] time[datetime]"#,
         )
     })
+    .or_else(|| published_datetime_for_selector(doc, r#"article time[datetime]"#))
+    .or_else(|| published_datetime_for_selector(doc, r#"main time[datetime]"#))
 }
 
 fn published_datetime_for_selector(doc: &ParsedDocument, raw_selector: &str) -> Option<String> {
