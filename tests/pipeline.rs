@@ -104,6 +104,41 @@ fn markdown_preserves_all_images_inside_figure() {
 }
 
 #[test]
+fn collapses_block_link_text_to_single_line() {
+    let html = r#"
+    <article>
+      <a href="https://github.com/nuxt/docs/pull/1797">
+        <div>Pull Request #1797 · nuxt/docs</div>
+      </a>
+    </article>"#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert_eq!(
+        markdown,
+        "[Pull Request #1797 · nuxt/docs](https://github.com/nuxt/docs/pull/1797)"
+    );
+}
+
+#[test]
+fn collapses_block_link_text_after_non_link_bracket_text() {
+    let html = r#"
+    <article>
+      <p>Check items[0] before the contribution.</p>
+      <a href="https://github.com/nuxt/docs/pull/1797">
+        <div>Pull Request #1797 · nuxt/docs</div>
+      </a>
+    </article>"#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("Check items[0] before the contribution."));
+    assert!(
+        markdown
+            .contains("[Pull Request #1797 · nuxt/docs](https://github.com/nuxt/docs/pull/1797)"),
+        "{markdown}"
+    );
+}
+
+#[test]
 fn markdown_escapes_special_characters_in_figure_images() {
     let html = r#"
     <article>
@@ -2605,6 +2640,22 @@ fn does_not_normalize_setext_inside_code_block() {
     assert!(markdown.contains("```\ntitle\n---\n```"));
     assert!(!markdown.contains("## title"));
     assert!(!markdown.contains("# title"));
+}
+
+#[test]
+fn does_not_collapse_multiline_links_inside_code_block() {
+    let html = r#"<article><pre><code class="language-md">[
+Pull Request #1797 · nuxt/docs
+](https://github.com/nuxt/docs/pull/1797)</code></pre></article>"#;
+
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(
+        markdown.contains(
+            "```md\n[\nPull Request #1797 · nuxt/docs\n](https://github.com/nuxt/docs/pull/1797)\n```"
+        ),
+        "{markdown}"
+    );
 }
 
 #[test]
