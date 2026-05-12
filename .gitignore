@@ -2,4 +2,4 @@ opensrc/
 docs/
 target/
 .worktrees/
-reports/parity/latest.*
+reports/
