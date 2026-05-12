@@ -1732,6 +1732,51 @@ async fn json_debug_marks_schema_org_candidate_selected() {
     assert!(output.status.success());
     let json: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(json["debug"]["contentSelector"], "schema-org");
+    assert!(json["debug"]["candidates"].is_array(), "{json:#}");
+    let candidates = json["debug"]["candidates"].as_array().unwrap();
+    assert!(candidates.iter().any(|candidate| {
+        candidate["selector"] == "schema-org"
+            && candidate["pass"] == "schema-org"
+            && candidate["decision"] == "selected"
+    }));
+}
+
+#[tokio::test]
+async fn json_debug_marks_schema_only_candidate_selected() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/debug-schema-only-candidate"))
+        .respond_with(html_response(
+            r#"
+            <html><head>
+              <script type="application/ld+json">
+              {
+                "@context": "https://schema.org",
+                "@type": "Article",
+                "headline": "Schema Only Debug Article",
+                "articleBody": "Schema content supplies the complete article body when the visible document has no readable candidates. The diagnostics output should still include a schema candidate and mark it selected."
+              }
+              </script>
+            </head><body>
+              <nav>Home</nav>
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/debug-schema-only-candidate", server.uri()))
+        .arg("--json")
+        .arg("--debug")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["debug"]["contentSelector"], "schema-org");
+    assert!(json["debug"]["candidates"].is_array(), "{json:#}");
     let candidates = json["debug"]["candidates"].as_array().unwrap();
     assert!(candidates.iter().any(|candidate| {
         candidate["selector"] == "schema-org"

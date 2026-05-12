@@ -413,18 +413,34 @@ fn extract_main_content_inner(
             diagnostics: diagnostics.clone(),
         })
     } else if let Some(html) = structured_content_candidate(doc, 0)? {
+        let word_count = text_word_count(&html);
         diagnostics
             .fallback_attempts
             .push(FallbackAttemptDiagnostic {
                 name: "schema-org".to_string(),
                 accepted: true,
                 previous_word_count: 0,
-                candidate_word_count: text_word_count(&html),
+                candidate_word_count: word_count,
                 reason: "structured content was available without a visible candidate".to_string(),
             });
-        push_candidate_diagnostics(diagnostics, &candidate_diagnostics, None);
-        Ok(ExtractedContent {
+        let schema_candidate = Candidate {
+            diagnostic_id: next_candidate_id,
+            diagnostic_pass: "schema-org".to_string(),
+            score: 0,
+            selector_index: 0,
+            selector: "schema-org".to_string(),
+            word_count,
+            content_block_count: 0,
             html,
+        };
+        candidate_diagnostics.push(vec![schema_candidate.clone()]);
+        push_candidate_diagnostics(
+            diagnostics,
+            &candidate_diagnostics,
+            Some(schema_candidate.diagnostic_id),
+        );
+        Ok(ExtractedContent {
+            html: schema_candidate.html,
             selector: Some("schema-org".to_string()),
             score: None,
             fallbacks: vec!["schema-org".to_string()],

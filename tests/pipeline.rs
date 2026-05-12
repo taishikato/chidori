@@ -129,6 +129,30 @@ fn markdown_keeps_caption_when_unwrapping_single_cell_layout_table() {
 }
 
 #[test]
+fn markdown_preserves_code_indentation_inside_single_cell_layout_table() {
+    let html = r#"
+    <article>
+      <table>
+        <tbody>
+          <tr>
+            <td>
+              <pre><code class="language-python">if enabled:
+    print("ready")</code></pre>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </article>"#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("```"), "{markdown}");
+    assert!(
+        markdown.contains("if enabled:\n    print(\"ready\")"),
+        "{markdown}"
+    );
+}
+
+#[test]
 fn preserves_inline_links_inside_simple_html_table_cells() {
     let html = r#"
     <article>
@@ -145,6 +169,28 @@ fn preserves_inline_links_inside_simple_html_table_cells() {
 
     assert!(
         markdown.contains("| Alpha | [Spec A](https://example.com/a) |"),
+        "{markdown}"
+    );
+}
+
+#[test]
+fn preserves_inline_code_inside_simple_html_table_cells() {
+    let html = r#"
+    <article>
+      <table>
+        <thead>
+          <tr><th>Name</th><th>Command</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Alpha</td><td><code>chidori --json</code></td></tr>
+        </tbody>
+      </table>
+    </article>"#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("| Name | Command |"), "{markdown}");
+    assert!(
+        markdown.contains("| Alpha | `chidori --json` |"),
         "{markdown}"
     );
 }
@@ -658,6 +704,24 @@ fn dom_byline_preserves_in_inside_organization_author_names() {
     let metadata = extract_metadata(&doc);
 
     assert_eq!(metadata.author, "Center for Women in Technology");
+}
+
+#[test]
+fn dom_byline_strips_on_date_after_single_word_author() {
+    let html = r#"<!doctype html>
+    <html>
+      <body>
+        <article>
+          <h1>Article Title</h1>
+          <p class="byline">By Alice on May 1, 2026</p>
+          <p>Hello world.</p>
+        </article>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.author, "Alice");
 }
 
 #[test]

@@ -477,7 +477,8 @@ fn trim_trailing_byline_noise(value: &str) -> &str {
         if let Some(index) = lower.find(marker) {
             if marker.trim() == "on" {
                 let before = value[..index].split_whitespace().count();
-                if before >= 2 {
+                let after = &value[index + marker.len()..];
+                if before >= 2 || looks_like_byline_date(after) {
                     end = end.min(index);
                 }
             } else {
@@ -502,6 +503,46 @@ fn trim_trailing_byline_noise(value: &str) -> &str {
         }
     }
     value[..end].trim()
+}
+
+fn looks_like_byline_date(value: &str) -> bool {
+    let value = value.trim();
+    let first = value
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .trim_matches(|ch: char| matches!(ch, ',' | '.'));
+    let first_lower = first.to_ascii_lowercase();
+
+    first.chars().any(|ch| ch.is_ascii_digit())
+        || (value.chars().any(|ch| ch.is_ascii_digit())
+            && matches!(
+                first_lower.as_str(),
+                "jan"
+                    | "january"
+                    | "feb"
+                    | "february"
+                    | "mar"
+                    | "march"
+                    | "apr"
+                    | "april"
+                    | "may"
+                    | "jun"
+                    | "june"
+                    | "jul"
+                    | "july"
+                    | "aug"
+                    | "august"
+                    | "sep"
+                    | "sept"
+                    | "september"
+                    | "oct"
+                    | "october"
+                    | "nov"
+                    | "november"
+                    | "dec"
+                    | "december"
+            ))
 }
 
 fn clean_author_candidate(value: &str) -> Option<String> {

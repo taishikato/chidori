@@ -647,6 +647,7 @@ fn layout_table_markdown(fragment: &str, replacements: &[(String, String)]) -> O
     let table_selector = Selector::parse("table").unwrap();
     let cell_selector = Selector::parse("td, th").unwrap();
     let caption_selector = Selector::parse("caption").unwrap();
+    let code_selector = Selector::parse("pre, code").unwrap();
     let table = dom.select(&table_selector).next()?;
     if table.inner_html().to_ascii_lowercase().contains("<table") {
         return None;
@@ -658,12 +659,18 @@ fn layout_table_markdown(fragment: &str, replacements: &[(String, String)]) -> O
     if cells[0].value().name().eq_ignore_ascii_case("th") {
         return None;
     }
-    let markdown = html2md::parse_html(&cells[0].inner_html())
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n\n");
+    let markdown = if table.select(&code_selector).next().is_some() {
+        html2md::parse_html(&cells[0].inner_html())
+            .trim()
+            .to_string()
+    } else {
+        html2md::parse_html(&cells[0].inner_html())
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    };
     let caption = table
         .select(&caption_selector)
         .next()
