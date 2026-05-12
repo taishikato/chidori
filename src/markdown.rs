@@ -593,8 +593,14 @@ fn figure_markdown(fragment: &str) -> Option<String> {
     let caption = dom
         .select(&caption_selector)
         .next()
-        .map(|caption| caption.text().collect::<Vec<_>>().join(" "))
-        .map(|text| text.split_whitespace().collect::<Vec<_>>().join(" "))
+        .map(|caption| {
+            html2md::parse_html(&replace_footnote_refs(&caption.inner_html()))
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
         .unwrap_or_default();
 
     if caption.is_empty() {

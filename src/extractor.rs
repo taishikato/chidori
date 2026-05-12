@@ -312,25 +312,29 @@ fn extract_main_content_inner(
     if let Some(candidate) = best_candidate.as_ref() {
         if let Some(html) = structured_content_candidate(doc, candidate.word_count)? {
             used_structured_content = true;
+            let word_count = text_word_count(&html);
             diagnostics
                 .fallback_attempts
                 .push(FallbackAttemptDiagnostic {
                     name: "schema-org".to_string(),
                     accepted: true,
                     previous_word_count: candidate.word_count,
-                    candidate_word_count: text_word_count(&html),
+                    candidate_word_count: word_count,
                     reason: "structured content was more complete".to_string(),
                 });
-            best_candidate = Some(Candidate {
+            let schema_candidate = Candidate {
                 diagnostic_id: next_candidate_id,
                 diagnostic_pass: "schema-org".to_string(),
                 score: candidate.score,
                 selector_index: candidate.selector_index,
                 selector: "schema-org".to_string(),
-                word_count: text_word_count(&html),
+                word_count,
                 content_block_count: candidate.content_block_count,
                 html,
-            });
+            };
+            next_candidate_id += 1;
+            candidate_diagnostics.push(vec![schema_candidate.clone()]);
+            best_candidate = Some(schema_candidate);
         }
     }
 

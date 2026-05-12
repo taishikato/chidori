@@ -1698,6 +1698,49 @@ async fn json_debug_marks_only_the_actual_selected_candidate() {
 }
 
 #[tokio::test]
+async fn json_debug_marks_schema_org_candidate_selected() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/debug-schema-candidate"))
+        .respond_with(html_response(
+            r#"
+            <html><head>
+              <script type="application/ld+json">
+              {
+                "@context": "https://schema.org",
+                "@type": "Article",
+                "headline": "Schema Debug Article",
+                "articleBody": "Schema content supplies the complete article body with enough words to replace the placeholder. The diagnostics output should include a schema candidate and mark it selected."
+              }
+              </script>
+            </head><body>
+              <article><h1>Schema Debug Article</h1><p>Stub.</p></article>
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/debug-schema-candidate", server.uri()))
+        .arg("--json")
+        .arg("--debug")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["debug"]["contentSelector"], "schema-org");
+    let candidates = json["debug"]["candidates"].as_array().unwrap();
+    assert!(candidates.iter().any(|candidate| {
+        candidate["selector"] == "schema-org"
+            && candidate["pass"] == "schema-org"
+            && candidate["decision"] == "selected"
+    }));
+}
+
+#[tokio::test]
 async fn json_debug_includes_cleanup_removal_reasons() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

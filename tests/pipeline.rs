@@ -58,6 +58,32 @@ fn markdown_preserves_figcaption_and_unwraps_single_cell_layout_tables() {
 }
 
 #[test]
+fn markdown_preserves_links_and_footnote_refs_inside_figcaptions() {
+    let html = r##"
+    <article>
+      <figure>
+        <img alt="Architecture diagram" src="/diagram.png">
+        <figcaption>Read the <a href="https://example.com/spec">full spec</a><sup><a href="#fn-1">1</a></sup>.</figcaption>
+      </figure>
+      <section id="footnotes">
+        <ol>
+          <li id="fn-1">Figure caption source. <a href="#fnref-1">↩</a></li>
+        </ol>
+      </section>
+    </article>"##;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(
+        markdown.contains("Read the [full spec](https://example.com/spec)[^1]."),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("[^1]: Figure caption source."),
+        "{markdown}"
+    );
+}
+
+#[test]
 fn preserves_inline_links_inside_simple_html_table_cells() {
     let html = r#"
     <article>
@@ -454,6 +480,35 @@ fn metadata_prefers_dateline_over_earlier_article_event_time() {
     let metadata = extract_metadata(&doc);
 
     assert_eq!(metadata.published, "2026-05-12T08:00:00Z");
+}
+
+#[test]
+fn metadata_prefers_schema_date_published_over_article_event_time() {
+    let html = r#"<!doctype html>
+    <html>
+      <head>
+        <script type="application/ld+json">
+        {
+          "@context": "https://schema.org",
+          "@type": "Article",
+          "headline": "Schema Date Article",
+          "datePublished": "2026-05-12T09:30:00Z"
+        }
+        </script>
+      </head>
+      <body>
+        <article>
+          <h1>Schema Date Article</h1>
+          <p>The archive opened on <time datetime="1970-01-01T00:00:00Z">January 1, 1970</time>.</p>
+          <p>The article body starts here.</p>
+        </article>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/schema-date").unwrap());
+
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.published, "2026-05-12T09:30:00Z");
 }
 
 #[test]

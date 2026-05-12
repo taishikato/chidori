@@ -101,9 +101,9 @@ pub fn extract_metadata_with_content_title(
             .or_else(|| meta(doc, "name", "date"))
             .or_else(|| meta(doc, "name", "datePublished"))
             .or_else(|| meta(doc, "name", "citation_publication_date"))
+            .or_else(|| schema_string(&schema_org_data, &["datePublished", "dateCreated"]))
             .or_else(|| published_near_h1(doc))
             .or_else(|| time_datetime(doc))
-            .or_else(|| schema_string(&schema_org_data, &["datePublished", "dateCreated"]))
             .unwrap_or_default(),
         language: schema_string(&schema_org_data, &["inLanguage"])
             .unwrap_or_else(|| html_lang(doc)),
@@ -364,8 +364,18 @@ fn published_near_h1(doc: &ParsedDocument) -> Option<String> {
             r#".date time[datetime], .dateline time[datetime], .published time[datetime], [class*="date"] time[datetime]"#,
         )
     })
-    .or_else(|| published_datetime_for_selector(doc, r#"article time[datetime]"#))
-    .or_else(|| published_datetime_for_selector(doc, r#"main time[datetime]"#))
+    .or_else(|| {
+        published_datetime_for_selector(
+            doc,
+            r#"article time[itemprop="datePublished"], article time[pubdate], article .byline time[datetime], article [class*="byline"] time[datetime]"#,
+        )
+    })
+    .or_else(|| {
+        published_datetime_for_selector(
+            doc,
+            r#"main time[itemprop="datePublished"], main time[pubdate], main .byline time[datetime], main [class*="byline"] time[datetime]"#,
+        )
+    })
 }
 
 fn published_datetime_for_selector(doc: &ParsedDocument, raw_selector: &str) -> Option<String> {
