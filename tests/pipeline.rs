@@ -104,6 +104,22 @@ fn markdown_preserves_all_images_inside_figure() {
 }
 
 #[test]
+fn markdown_escapes_special_characters_in_figure_images() {
+    let html = r#"
+    <article>
+      <figure>
+        <img alt="Architecture [draft]" src="/images/diagram(final).png">
+      </figure>
+    </article>"#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(
+        markdown.contains(r"![Architecture \[draft\]](/images/diagram\(final\).png)"),
+        "{markdown}"
+    );
+}
+
+#[test]
 fn markdown_keeps_caption_when_unwrapping_single_cell_layout_table() {
     let html = r#"
     <article>
@@ -554,6 +570,25 @@ fn metadata_prefers_scoped_article_byline_over_global_author_chrome() {
 }
 
 #[test]
+fn metadata_keeps_on_inside_organization_author_name() {
+    let html = r#"<!doctype html>
+    <html>
+      <body>
+        <article>
+          <h1>Research Article</h1>
+          <p class="byline">By Center for Research on Aging</p>
+          <p>The article body starts here and should remain ordinary content.</p>
+        </article>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/research").unwrap());
+
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.author, "Center for Research on Aging");
+}
+
+#[test]
 fn metadata_prefers_dateline_over_earlier_article_event_time() {
     let html = r#"<!doctype html>
     <html>
@@ -722,6 +757,24 @@ fn dom_byline_strips_on_date_after_single_word_author() {
     let metadata = extract_metadata(&doc);
 
     assert_eq!(metadata.author, "Alice");
+}
+
+#[test]
+fn dom_byline_strips_on_weekday_after_author_name() {
+    let html = r#"<!doctype html>
+    <html>
+      <body>
+        <article>
+          <h1>Article Title</h1>
+          <p class="byline">By Ada Lovelace on Tuesday</p>
+          <p>Hello world.</p>
+        </article>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.author, "Ada Lovelace");
 }
 
 #[test]

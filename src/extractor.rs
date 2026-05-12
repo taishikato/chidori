@@ -48,6 +48,21 @@ struct Candidate {
     html: String,
 }
 
+impl Candidate {
+    fn diagnostic_record(&self) -> Self {
+        Self {
+            diagnostic_id: self.diagnostic_id,
+            diagnostic_pass: self.diagnostic_pass.clone(),
+            score: self.score,
+            selector_index: self.selector_index,
+            selector: self.selector.clone(),
+            word_count: self.word_count,
+            content_block_count: self.content_block_count,
+            html: String::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ExtractedContent {
     pub html: String,
@@ -333,7 +348,7 @@ fn extract_main_content_inner(
                 html,
             };
             next_candidate_id += 1;
-            candidate_diagnostics.push(vec![schema_candidate.clone()]);
+            candidate_diagnostics.push(vec![schema_candidate.diagnostic_record()]);
             best_candidate = Some(schema_candidate);
         }
     }
@@ -433,7 +448,7 @@ fn extract_main_content_inner(
             content_block_count: 0,
             html,
         };
-        candidate_diagnostics.push(vec![schema_candidate.clone()]);
+        candidate_diagnostics.push(vec![schema_candidate.diagnostic_record()]);
         push_candidate_diagnostics(
             diagnostics,
             &candidate_diagnostics,
@@ -1990,7 +2005,7 @@ fn best_candidate_for_selectors(
                 selector: (*raw_selector).to_string(),
                 word_count,
                 content_block_count,
-                html: element.html(),
+                html: String::new(),
             };
             *next_candidate_id += 1;
             if best_candidate.as_ref().is_none_or(|best_candidate| {
@@ -2001,7 +2016,10 @@ fn best_candidate_for_selectors(
                         && candidate.selector_index == best_candidate.selector_index
                         && candidate.word_count > best_candidate.word_count)
             }) {
-                best_candidate = Some(candidate.clone());
+                best_candidate = Some(Candidate {
+                    html: element.html(),
+                    ..candidate.clone()
+                });
             }
             candidates.push(candidate);
         }
@@ -2109,6 +2127,57 @@ mod tests {
         );
 
         assert!(prose_score > link_score);
+    }
+
+    #[test]
+    fn candidate_diagnostics_do_not_retain_html_fragments() {
+        let doc = parse_doc(
+            r#"<html><body>
+              <article><h1>First</h1><p>Short article text.</p></article>
+              <article><h1>Second</h1><p>This article has enough extra prose to be selected over the first candidate.</p></article>
+            </body></html>"#,
+            "https://example.com/post",
+        );
+        let mut next_candidate_id = 0;
+
+        let (best_candidate, diagnostics) = best_candidate_for_selectors(
+            &doc,
+            &["article"],
+            &scoring_selectors(),
+            false,
+            "primary",
+            &mut next_candidate_id,
+        )
+        .unwrap();
+
+        assert!(
+            best_candidate.unwrap().html.contains("Second"),
+            "selected candidate still needs its HTML"
+        );
+        assert_eq!(
+            diagnostics
+                .iter()
+                .map(|candidate| candidate.html.len())
+                .sum::<usize>(),
+            0,
+            "diagnostic candidates should only retain scalar fields"
+        );
+    }
+
+    #[test]
+    fn diagnostic_record_does_not_clone_candidate_html() {
+        let source = include_str!("extractor.rs");
+        let diagnostic_record_start = source.find("fn diagnostic_record").unwrap();
+        let diagnostic_record_end = source[diagnostic_record_start..]
+            .find("#[derive(Debug, Clone)]")
+            .map(|offset| diagnostic_record_start + offset)
+            .unwrap();
+        let diagnostic_record_source = &source[diagnostic_record_start..diagnostic_record_end];
+
+        assert!(
+            !diagnostic_record_source.contains("..self.clone()"),
+            "{diagnostic_record_source}"
+        );
     }
 
     #[test]

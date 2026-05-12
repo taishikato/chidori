@@ -612,7 +612,25 @@ fn image_markdown(img: ElementRef<'_>) -> Option<String> {
     if is_dangerous_url(src) {
         return None;
     }
-    Some(format!("![{}]({})", alt, src))
+    Some(format!(
+        "![{}]({})",
+        escape_markdown_image_alt(alt),
+        escape_markdown_image_url(src)
+    ))
+}
+
+fn escape_markdown_image_alt(value: &str) -> String {
+    value
+        .replace('\\', r"\\")
+        .replace('[', r"\[")
+        .replace(']', r"\]")
+}
+
+fn escape_markdown_image_url(value: &str) -> String {
+    value
+        .replace('\\', r"\\")
+        .replace('(', r"\(")
+        .replace(')', r"\)")
 }
 
 fn inline_markdown_from_html(html: &str) -> String {

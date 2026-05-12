@@ -476,9 +476,8 @@ fn trim_trailing_byline_noise(value: &str) -> &str {
     for marker in [" published ", " updated ", " posted ", " on "] {
         if let Some(index) = lower.find(marker) {
             if marker.trim() == "on" {
-                let before = value[..index].split_whitespace().count();
                 let after = &value[index + marker.len()..];
-                if before >= 2 || looks_like_byline_date(after) {
+                if looks_like_byline_date(after) {
                     end = end.min(index);
                 }
             } else {
@@ -515,6 +514,26 @@ fn looks_like_byline_date(value: &str) -> bool {
     let first_lower = first.to_ascii_lowercase();
 
     first.chars().any(|ch| ch.is_ascii_digit())
+        || matches!(
+            first_lower.as_str(),
+            "mon"
+                | "monday"
+                | "tue"
+                | "tues"
+                | "tuesday"
+                | "wed"
+                | "wednesday"
+                | "thu"
+                | "thur"
+                | "thurs"
+                | "thursday"
+                | "fri"
+                | "friday"
+                | "sat"
+                | "saturday"
+                | "sun"
+                | "sunday"
+        )
         || (value.chars().any(|ch| ch.is_ascii_digit())
             && matches!(
                 first_lower.as_str(),
