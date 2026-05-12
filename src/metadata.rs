@@ -101,9 +101,9 @@ pub fn extract_metadata_with_content_title(
             .or_else(|| meta(doc, "name", "date"))
             .or_else(|| meta(doc, "name", "datePublished"))
             .or_else(|| meta(doc, "name", "citation_publication_date"))
+            .or_else(|| schema_string(&schema_org_data, &["datePublished", "dateCreated"]))
             .or_else(|| published_near_h1(doc))
             .or_else(|| time_datetime(doc))
-            .or_else(|| schema_string(&schema_org_data, &["datePublished", "dateCreated"]))
             .unwrap_or_default(),
         language: schema_string(&schema_org_data, &["inLanguage"])
             .unwrap_or_else(|| html_lang(doc)),
@@ -364,6 +364,18 @@ fn published_near_h1(doc: &ParsedDocument) -> Option<String> {
             r#".date time[datetime], .dateline time[datetime], .published time[datetime], [class*="date"] time[datetime]"#,
         )
     })
+    .or_else(|| {
+        published_datetime_for_selector(
+            doc,
+            r#"article time[itemprop="datePublished"], article time[pubdate], article .byline time[datetime], article [class*="byline"] time[datetime]"#,
+        )
+    })
+    .or_else(|| {
+        published_datetime_for_selector(
+            doc,
+            r#"main time[itemprop="datePublished"], main time[pubdate], main .byline time[datetime], main [class*="byline"] time[datetime]"#,
+        )
+    })
 }
 
 fn published_datetime_for_selector(doc: &ParsedDocument, raw_selector: &str) -> Option<String> {
@@ -381,14 +393,14 @@ fn scoped_author(doc: &ParsedDocument) -> Option<String> {
 }
 
 fn scoped_article_author(doc: &ParsedDocument) -> Option<String> {
-    rel_author_for_selector(
+    byline_author_for_selector(
         doc,
-        r#"article a[rel~="author"], article address[rel~="author"]"#,
+        r#"article .byline, article [class*="byline"], article [itemprop="author"], article [rel~="author"]"#,
     )
     .or_else(|| {
-        byline_author_for_selector(
+        rel_author_for_selector(
             doc,
-            r#"article .byline, article [class*="byline"], article [itemprop="author"]"#,
+            r#"article a[rel~="author"], article address[rel~="author"]"#,
         )
     })
 }
@@ -451,6 +463,9 @@ fn strip_byline_prefix(value: &str) -> &str {
         .or_else(|| value.strip_prefix("by "))
         .or_else(|| value.strip_prefix("BY "))
         .or_else(|| value.strip_prefix("By:"))
+        .or_else(|| value.strip_prefix("Written by "))
+        .or_else(|| value.strip_prefix("written by "))
+        .or_else(|| value.strip_prefix("Author:"))
         .map(str::trim)
         .unwrap_or(value)
 }
@@ -458,9 +473,16 @@ fn strip_byline_prefix(value: &str) -> &str {
 fn trim_trailing_byline_noise(value: &str) -> &str {
     let lower = value.to_ascii_lowercase();
     let mut end = value.len();
-    for marker in [" published ", " updated ", " posted "] {
+    for marker in [" published ", " updated ", " posted ", " on "] {
         if let Some(index) = lower.find(marker) {
-            end = end.min(index);
+            if marker.trim() == "on" {
+                let after = &value[index + marker.len()..];
+                if looks_like_byline_date(after) {
+                    end = end.min(index);
+                }
+            } else {
+                end = end.min(index);
+            }
         }
     }
     for marker in [" follow", " subscribe"] {
@@ -480,6 +502,66 @@ fn trim_trailing_byline_noise(value: &str) -> &str {
         }
     }
     value[..end].trim()
+}
+
+fn looks_like_byline_date(value: &str) -> bool {
+    let value = value.trim();
+    let first = value
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .trim_matches(|ch: char| matches!(ch, ',' | '.'));
+    let first_lower = first.to_ascii_lowercase();
+
+    first.chars().any(|ch| ch.is_ascii_digit())
+        || matches!(
+            first_lower.as_str(),
+            "mon"
+                | "monday"
+                | "tue"
+                | "tues"
+                | "tuesday"
+                | "wed"
+                | "wednesday"
+                | "thu"
+                | "thur"
+                | "thurs"
+                | "thursday"
+                | "fri"
+                | "friday"
+                | "sat"
+                | "saturday"
+                | "sun"
+                | "sunday"
+        )
+        || (value.chars().any(|ch| ch.is_ascii_digit())
+            && matches!(
+                first_lower.as_str(),
+                "jan"
+                    | "january"
+                    | "feb"
+                    | "february"
+                    | "mar"
+                    | "march"
+                    | "apr"
+                    | "april"
+                    | "may"
+                    | "jun"
+                    | "june"
+                    | "jul"
+                    | "july"
+                    | "aug"
+                    | "august"
+                    | "sep"
+                    | "sept"
+                    | "september"
+                    | "oct"
+                    | "october"
+                    | "nov"
+                    | "november"
+                    | "dec"
+                    | "december"
+            ))
 }
 
 fn clean_author_candidate(value: &str) -> Option<String> {

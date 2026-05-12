@@ -29,6 +29,146 @@ fn converts_simple_html_tables_to_markdown_tables() {
 }
 
 #[test]
+fn markdown_preserves_figcaption_and_unwraps_single_cell_layout_tables() {
+    let html =
+        std::fs::read_to_string("tests/fixtures/reference/markdown--figure-and-layout-table.html")
+            .unwrap();
+    let markdown = html_to_markdown(&html, &MarkdownOptions { max_chars: None });
+
+    assert!(
+        markdown
+            .contains("![Architecture diagram](/large.png)\n\nFigure 1. The extraction pipeline."),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("Figure 1. The extraction pipeline."),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("This is a layout table cell that should become ordinary prose."),
+        "{markdown}"
+    );
+    assert!(markdown.contains("| Name | Value |"), "{markdown}");
+    assert!(markdown.contains("| Alpha | 10 |"), "{markdown}");
+    assert!(
+        !markdown.contains("|This is a layout table cell"),
+        "{markdown}"
+    );
+    assert!(!markdown.contains("<td>"), "{markdown}");
+}
+
+#[test]
+fn markdown_preserves_links_and_footnote_refs_inside_figcaptions() {
+    let html = r##"
+    <article>
+      <figure>
+        <img alt="Architecture diagram" src="/diagram.png">
+        <figcaption>Read the <a href="https://example.com/spec">full spec</a><sup><a href="#fn-1">1</a></sup>.</figcaption>
+      </figure>
+      <section id="footnotes">
+        <ol>
+          <li id="fn-1">Figure caption source. <a href="#fnref-1">↩</a></li>
+        </ol>
+      </section>
+    </article>"##;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(
+        markdown.contains("Read the [full spec](https://example.com/spec)[^1]."),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("[^1]: Figure caption source."),
+        "{markdown}"
+    );
+}
+
+#[test]
+fn markdown_preserves_all_images_inside_figure() {
+    let html = r#"
+    <article>
+      <figure>
+        <img alt="Before" src="/before.png">
+        <img alt="After" src="/after.png">
+        <figcaption>Before and after comparison.</figcaption>
+      </figure>
+    </article>"#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("![Before](/before.png)"), "{markdown}");
+    assert!(markdown.contains("![After](/after.png)"), "{markdown}");
+    assert!(
+        markdown.contains("Before and after comparison."),
+        "{markdown}"
+    );
+}
+
+#[test]
+fn markdown_escapes_special_characters_in_figure_images() {
+    let html = r#"
+    <article>
+      <figure>
+        <img alt="Architecture [draft]" src="/images/diagram(final).png">
+      </figure>
+    </article>"#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(
+        markdown.contains(r"![Architecture \[draft\]](/images/diagram\(final\).png)"),
+        "{markdown}"
+    );
+}
+
+#[test]
+fn markdown_keeps_caption_when_unwrapping_single_cell_layout_table() {
+    let html = r#"
+    <article>
+      <table>
+        <caption>Important context for the table.</caption>
+        <tbody>
+          <tr>
+            <td>This layout cell should become prose.</td>
+          </tr>
+        </tbody>
+      </table>
+    </article>"#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(
+        markdown.contains("Important context for the table."),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("This layout cell should become prose."),
+        "{markdown}"
+    );
+}
+
+#[test]
+fn markdown_preserves_code_indentation_inside_single_cell_layout_table() {
+    let html = r#"
+    <article>
+      <table>
+        <tbody>
+          <tr>
+            <td>
+              <pre><code class="language-python">if enabled:
+    print("ready")</code></pre>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </article>"#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("```"), "{markdown}");
+    assert!(
+        markdown.contains("if enabled:\n    print(\"ready\")"),
+        "{markdown}"
+    );
+}
+
+#[test]
 fn preserves_inline_links_inside_simple_html_table_cells() {
     let html = r#"
     <article>
@@ -45,6 +185,28 @@ fn preserves_inline_links_inside_simple_html_table_cells() {
 
     assert!(
         markdown.contains("| Alpha | [Spec A](https://example.com/a) |"),
+        "{markdown}"
+    );
+}
+
+#[test]
+fn preserves_inline_code_inside_simple_html_table_cells() {
+    let html = r#"
+    <article>
+      <table>
+        <thead>
+          <tr><th>Name</th><th>Command</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Alpha</td><td><code>chidori --json</code></td></tr>
+        </tbody>
+      </table>
+    </article>"#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("| Name | Command |"), "{markdown}");
+    assert!(
+        markdown.contains("| Alpha | `chidori --json` |"),
         "{markdown}"
     );
 }
@@ -387,6 +549,95 @@ fn extracts_author_and_published_from_dom_byline_near_heading() {
 }
 
 #[test]
+fn metadata_prefers_scoped_article_byline_over_global_author_chrome() {
+    let html =
+        std::fs::read_to_string("tests/fixtures/reference/metadata--article-bylines.html").unwrap();
+    let doc = ParsedDocument::parse(
+        html,
+        Url::parse("https://example.com/report/metadata-accuracy").unwrap(),
+    );
+
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.title, "Metadata Accuracy Example");
+    assert_eq!(metadata.site, "Example Daily");
+    assert_eq!(metadata.author, "Ada Lovelace and Grace Hopper");
+    assert_eq!(metadata.published, "2026-05-10T12:34:00Z");
+    assert_eq!(
+        metadata.canonical_url,
+        "https://example.com/report/metadata-accuracy"
+    );
+}
+
+#[test]
+fn metadata_keeps_on_inside_organization_author_name() {
+    let html = r#"<!doctype html>
+    <html>
+      <body>
+        <article>
+          <h1>Research Article</h1>
+          <p class="byline">By Center for Research on Aging</p>
+          <p>The article body starts here and should remain ordinary content.</p>
+        </article>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/research").unwrap());
+
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.author, "Center for Research on Aging");
+}
+
+#[test]
+fn metadata_prefers_dateline_over_earlier_article_event_time() {
+    let html = r#"<!doctype html>
+    <html>
+      <body>
+        <article>
+          <h1>Timeline Article</h1>
+          <p>The archive opened on <time datetime="1970-01-01T00:00:00Z">January 1, 1970</time>.</p>
+          <p class="dateline">Published <time datetime="2026-05-12T08:00:00Z">May 12, 2026</time></p>
+          <p>The article body starts after the dateline.</p>
+        </article>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/timeline").unwrap());
+
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.published, "2026-05-12T08:00:00Z");
+}
+
+#[test]
+fn metadata_prefers_schema_date_published_over_article_event_time() {
+    let html = r#"<!doctype html>
+    <html>
+      <head>
+        <script type="application/ld+json">
+        {
+          "@context": "https://schema.org",
+          "@type": "Article",
+          "headline": "Schema Date Article",
+          "datePublished": "2026-05-12T09:30:00Z"
+        }
+        </script>
+      </head>
+      <body>
+        <article>
+          <h1>Schema Date Article</h1>
+          <p>The archive opened on <time datetime="1970-01-01T00:00:00Z">January 1, 1970</time>.</p>
+          <p>The article body starts here.</p>
+        </article>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/schema-date").unwrap());
+
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.published, "2026-05-12T09:30:00Z");
+}
+
+#[test]
 fn placeholder_social_title_yields_to_extracted_content_title() {
     let html = r#"<!doctype html>
     <html>
@@ -462,6 +713,60 @@ fn dom_byline_strips_trailing_published_and_follow_text() {
         <article>
           <h1>Article Title</h1>
           <p class="byline">By Ada Lovelace Published May 10, 2026 Follow</p>
+          <p>Hello world.</p>
+        </article>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.author, "Ada Lovelace");
+}
+
+#[test]
+fn dom_byline_preserves_in_inside_organization_author_names() {
+    let html = r#"<!doctype html>
+    <html>
+      <body>
+        <article>
+          <h1>Article Title</h1>
+          <p class="byline">By Center for Women in Technology</p>
+          <p>Hello world.</p>
+        </article>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.author, "Center for Women in Technology");
+}
+
+#[test]
+fn dom_byline_strips_on_date_after_single_word_author() {
+    let html = r#"<!doctype html>
+    <html>
+      <body>
+        <article>
+          <h1>Article Title</h1>
+          <p class="byline">By Alice on May 1, 2026</p>
+          <p>Hello world.</p>
+        </article>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+    let metadata = extract_metadata(&doc);
+
+    assert_eq!(metadata.author, "Alice");
+}
+
+#[test]
+fn dom_byline_strips_on_weekday_after_author_name() {
+    let html = r#"<!doctype html>
+    <html>
+      <body>
+        <article>
+          <h1>Article Title</h1>
+          <p class="byline">By Ada Lovelace on Tuesday</p>
           <p>Hello world.</p>
         </article>
       </body>
@@ -1980,6 +2285,53 @@ fn removes_related_card_sections_even_when_footer_follows() {
     assert!(!cleaned.contains("Frontend Design"));
     assert!(!cleaned.contains("Claude Platform"));
     assert!(!cleaned.contains("Privacy policy"));
+}
+
+#[test]
+fn cleaner_removes_related_sections_with_nested_cards_without_string_reparse_loss() {
+    let html = r#"
+    <article>
+      <p>Main text with <a href="/real">a real link</a> survives.</p>
+      <section class="grid">
+        <header><h2>Related articles</h2></header>
+        <div><article><a href="/a"><h3>Related One</h3><p>Teaser one.</p></a></article></div>
+        <div><article><a href="/b"><h3>Related Two</h3><p>Teaser two.</p></a></article></div>
+      </section>
+    </article>
+    "#;
+
+    let result = clean_html_with_report(html, &CleanOptions { no_images: false });
+
+    assert!(result.html.contains("Main text with"));
+    assert!(result.html.contains("href=\"/real\""));
+    assert!(!result.html.contains("Related One"));
+    assert!(result.removals.iter().any(|record| {
+        record.reason == "related-card-section" && record.text_preview.contains("Related articles")
+    }));
+}
+
+#[test]
+fn cleaner_keeps_article_text_when_related_cards_share_parent_wrapper() {
+    let html = r#"
+    <article>
+      <div class="article-shell">
+        <p>Main analysis that must remain after related cards are removed.</p>
+        <section>
+          <h2>Related articles</h2>
+          <a href="/one"><h3>Related One</h3><p>Teaser one.</p></a>
+          <a href="/two"><h3>Related Two</h3><p>Teaser two.</p></a>
+        </section>
+      </div>
+    </article>
+    "#;
+
+    let result = clean_html_with_report(html, &CleanOptions { no_images: false });
+
+    assert!(result.html.contains("Main analysis that must remain"));
+    assert!(!result.html.contains("Related One"));
+    assert!(result.removals.iter().any(|record| {
+        record.reason == "related-card-section" && record.selector == "section, div"
+    }));
 }
 
 #[test]

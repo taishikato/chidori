@@ -1606,6 +1606,186 @@ async fn json_debug_includes_selected_content_candidate_details() {
 }
 
 #[tokio::test]
+async fn json_debug_includes_candidate_list_and_fallback_attempts() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/debug-candidates"))
+        .respond_with(html_response(
+            r#"
+            <html><body>
+              <article><h1>Stub</h1><p>Stub.</p></article>
+              <main>
+                <h1>Recovered Debug Article</h1>
+                <p>This real article body has enough words to trigger a useful retry.</p>
+                <p>The fallback candidate should be visible in debug JSON.</p>
+                <p>The rejected article candidate should also be visible.</p>
+                <p>It gives diagnostics enough signal to explain why the retry was accepted.</p>
+              </main>
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/debug-candidates", server.uri()))
+        .arg("--json")
+        .arg("--debug")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let debug = &json["debug"];
+
+    let candidates = debug["candidates"].as_array().unwrap();
+    assert!(candidates.iter().any(|candidate| {
+        candidate["selector"] == "article"
+            && candidate["wordCount"].as_u64().unwrap() < 50
+            && candidate["decision"] == "rejected"
+    }));
+    assert!(candidates.iter().any(|candidate| {
+        candidate["selector"] == "main" && candidate["decision"] == "selected"
+    }));
+
+    let attempts = debug["fallbackAttempts"].as_array().unwrap();
+    assert!(attempts.iter().any(|attempt| {
+        attempt["name"] == "low-word-selector-retry" && attempt["accepted"] == true
+    }));
+}
+
+#[tokio::test]
+async fn json_debug_marks_only_the_actual_selected_candidate() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/debug-selected-candidate"))
+        .respond_with(html_response(
+            r#"
+            <html><body>
+              <article><h1>Stub</h1><p>Stub.</p></article>
+              <article hidden>
+                <h1>Hidden Complete Article</h1>
+                <p>This hidden article has the complete story and enough words to be chosen.</p>
+                <p>The visible article is only a placeholder, so diagnostics should mark only this candidate selected.</p>
+                <p>Duplicate selector names must not create duplicate selected candidates.</p>
+              </article>
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/debug-selected-candidate", server.uri()))
+        .arg("--json")
+        .arg("--debug")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let candidates = json["debug"]["candidates"].as_array().unwrap();
+    let selected_articles = candidates
+        .iter()
+        .filter(|candidate| candidate["selector"] == "article")
+        .filter(|candidate| candidate["decision"] == "selected")
+        .collect::<Vec<_>>();
+
+    assert_eq!(selected_articles.len(), 1, "{candidates:#?}");
+    assert!(selected_articles[0]["wordCount"].as_u64().unwrap() > 20);
+}
+
+#[tokio::test]
+async fn json_debug_marks_schema_org_candidate_selected() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/debug-schema-candidate"))
+        .respond_with(html_response(
+            r#"
+            <html><head>
+              <script type="application/ld+json">
+              {
+                "@context": "https://schema.org",
+                "@type": "Article",
+                "headline": "Schema Debug Article",
+                "articleBody": "Schema content supplies the complete article body with enough words to replace the placeholder. The diagnostics output should include a schema candidate and mark it selected."
+              }
+              </script>
+            </head><body>
+              <article><h1>Schema Debug Article</h1><p>Stub.</p></article>
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/debug-schema-candidate", server.uri()))
+        .arg("--json")
+        .arg("--debug")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["debug"]["contentSelector"], "schema-org");
+    assert!(json["debug"]["candidates"].is_array(), "{json:#}");
+    let candidates = json["debug"]["candidates"].as_array().unwrap();
+    assert!(candidates.iter().any(|candidate| {
+        candidate["selector"] == "schema-org"
+            && candidate["pass"] == "schema-org"
+            && candidate["decision"] == "selected"
+    }));
+}
+
+#[tokio::test]
+async fn json_debug_marks_schema_only_candidate_selected() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/debug-schema-only-candidate"))
+        .respond_with(html_response(
+            r#"
+            <html><head>
+              <script type="application/ld+json">
+              {
+                "@context": "https://schema.org",
+                "@type": "Article",
+                "headline": "Schema Only Debug Article",
+                "articleBody": "Schema content supplies the complete article body when the visible document has no readable candidates. The diagnostics output should still include a schema candidate and mark it selected."
+              }
+              </script>
+            </head><body>
+              <nav>Home</nav>
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/debug-schema-only-candidate", server.uri()))
+        .arg("--json")
+        .arg("--debug")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["debug"]["contentSelector"], "schema-org");
+    assert!(json["debug"]["candidates"].is_array(), "{json:#}");
+    let candidates = json["debug"]["candidates"].as_array().unwrap();
+    assert!(candidates.iter().any(|candidate| {
+        candidate["selector"] == "schema-org"
+            && candidate["pass"] == "schema-org"
+            && candidate["decision"] == "selected"
+    }));
+}
+
+#[tokio::test]
 async fn json_debug_includes_cleanup_removal_reasons() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -1644,6 +1824,49 @@ async fn json_debug_includes_cleanup_removal_reasons() {
         .as_str()
         .unwrap()
         .contains("Article-local menu"));
+}
+
+#[tokio::test]
+async fn json_debug_cleanup_removals_include_text_preview() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/debug-removal-preview"))
+        .respond_with(html_response(
+            r#"
+            <html><body>
+              <article>
+                <h1>Article With Related Links</h1>
+                <p>The main article text should remain visible in the output.</p>
+                <section>
+                  <h2>Related articles</h2>
+                  <a href="/one">First related card</a>
+                  <a href="/two">Second related card</a>
+                </section>
+              </article>
+            </body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/debug-removal-preview", server.uri()))
+        .arg("--json")
+        .arg("--debug")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let removals = json["debug"]["removals"].as_array().unwrap();
+    assert!(removals.iter().any(|record| {
+        record["reason"] == "related-card-section"
+            && record["textPreview"]
+                .as_str()
+                .unwrap()
+                .contains("Related articles")
+    }));
 }
 
 #[tokio::test]
