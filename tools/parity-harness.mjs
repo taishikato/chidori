@@ -418,6 +418,77 @@ function metadataGaps(report) {
     .filter(({ fields }) => fields.length > 0);
 }
 
+function markdownCode(value) {
+  const text = String(value).replace(/\r\n?/g, '\n');
+  if (!text.includes('`') && !text.includes('\n') && text.length <= 120) {
+    return `\`${text}\``;
+  }
+
+  const longestFence =
+    text
+      .match(/`+/g)
+      ?.reduce((max, run) => Math.max(max, run.length), 0) ?? 0;
+  const fence = '`'.repeat(Math.max(3, longestFence + 1));
+  return `${fence}\n${text}\n${fence}`;
+}
+
+function indentedCodeBlock(value) {
+  return markdownCode(value)
+    .split('\n')
+    .map((line) => `    ${line}`)
+    .join('\n');
+}
+
+function snippetList(label, snippets) {
+  if (!snippets || snippets.length === 0) return [];
+
+  const rendered = snippets.map(markdownCode);
+  if (rendered.every((snippet) => !snippet.includes('\n'))) {
+    return [`${label}: ${rendered.join(', ')}`];
+  }
+
+  return snippets.map((snippet) => {
+    const code = markdownCode(snippet);
+    if (!code.includes('\n')) {
+      return `${label}: ${code}`;
+    }
+    return `${label}:\n${indentedCodeBlock(snippet)}`;
+  });
+}
+
+function qualityGateLines(result) {
+  const status = result.expectations?.chidori;
+  if (!status || status.ok) return [];
+
+  const lines = [];
+  lines.push(`- ${result.id}:`);
+  for (const detail of snippetList('missing', status.missingExpected)) {
+    lines.push(`  - ${detail}`);
+  }
+  for (const detail of snippetList('rejected present', status.presentRejected)) {
+    lines.push(`  - ${detail}`);
+  }
+  for (const mismatch of status.metadataMismatches ?? []) {
+    const expected = markdownCode(mismatch.expected);
+    const actual = markdownCode(mismatch.actual);
+    if (!expected.includes('\n') && !actual.includes('\n')) {
+      lines.push(`  - metadata ${mismatch.field}: expected ${expected}, got ${actual}`);
+    } else {
+      lines.push(`  - metadata ${mismatch.field}:`);
+      lines.push(`    expected:\n${indentedCodeBlock(mismatch.expected)}`);
+      lines.push(`    actual:\n${indentedCodeBlock(mismatch.actual)}`);
+    }
+  }
+  if (status.wordCount && !status.wordCount.ok) {
+    const max = status.wordCount.max ?? 'unbounded';
+    lines.push(`  - word count: ${status.wordCount.actual} outside ${status.wordCount.min}-${max}`);
+  }
+  if (status.noiseRatio && !status.noiseRatio.ok) {
+    lines.push(`  - noise ratio: ${status.noiseRatio.ratio}`);
+  }
+  return lines;
+}
+
 function renderMarkdown(report) {
   const lines = [
     '# Extraction Parity Report',
@@ -456,6 +527,12 @@ function renderMarkdown(report) {
     for (const result of open) {
       lines.push(`- ${result.id}: ${result.status}`);
     }
+  }
+
+  const qualityDetails = report.results.flatMap(qualityGateLines);
+  if (qualityDetails.length > 0) {
+    lines.push('', '## Quality Gate Details', '');
+    lines.push(...qualityDetails);
   }
 
   const gaps = metadataGaps(report);

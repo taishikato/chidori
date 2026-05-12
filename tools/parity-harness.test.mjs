@@ -121,3 +121,93 @@ test('expectationStatus preserves legacy array calls', () => {
   assert.deepEqual(status.missingExpected, []);
   assert.deepEqual(status.presentRejected, ['reject this']);
 });
+
+test('renderMarkdown includes quality gate failure details', () => {
+  const report = buildReport([
+    {
+      id: 'lazy-image',
+      category: 'dom-standardization',
+      capability: 'lazy image normalization',
+      mappedStatus: 'planned',
+      status: 'chidori-worse',
+      similarity: 0.4,
+      wordCount: { chidori: 8, reference: 20 },
+      expectations: {
+        chidori: {
+          ok: false,
+          missingExpected: ['![Diagram](https://example.com/full.png)'],
+          presentRejected: ['data:image/svg+xml'],
+          metadataMismatches: [],
+          wordCount: { ok: false, actual: 8, min: 10, max: 50 },
+          noiseRatio: { ok: false, ratio: 0.4, matched: ['data:image/svg+xml'] },
+        },
+        reference: {
+          ok: true,
+          missingExpected: [],
+          presentRejected: [],
+          metadataMismatches: [],
+          wordCount: { ok: true, actual: 20, min: 10, max: 50 },
+          noiseRatio: { ok: true, ratio: 0, matched: [] },
+        },
+      },
+      metadata: { chidori: {}, reference: {} },
+    },
+  ]);
+
+  const markdown = renderMarkdown(report);
+
+  assert.match(markdown, /## Quality Gate Details/);
+  assert.match(markdown, /lazy-image/);
+  assert.match(markdown, /missing: `!\[Diagram\]\(https:\/\/example\.com\/full\.png\)`/);
+  assert.match(markdown, /rejected present: `data:image\/svg\+xml`/);
+  assert.match(markdown, /word count: 8 outside 10-50/);
+  assert.match(markdown, /noise ratio: 0.4/);
+});
+
+test('renderMarkdown keeps complex quality gate snippets readable', () => {
+  const missing = 'missing `image`\nwith ```fence```';
+  const rejected = '<img alt="bad"\nsrc="data:image/gif;base64,abc`123">';
+  const report = buildReport([
+    {
+      id: 'complex-snippet',
+      category: 'dom-standardization',
+      capability: 'complex snippet rendering',
+      mappedStatus: 'planned',
+      status: 'chidori-worse',
+      similarity: 0.2,
+      wordCount: { chidori: 4, reference: 12 },
+      expectations: {
+        chidori: {
+          ok: false,
+          missingExpected: [missing],
+          presentRejected: [rejected],
+          metadataMismatches: [
+            {
+              field: 'title',
+              expected: 'Expected `Title`\nline two',
+              actual: 'Actual ```Title```',
+            },
+          ],
+          wordCount: { ok: true, actual: 12, min: 5, max: 50 },
+          noiseRatio: { ok: true, ratio: 0, matched: [] },
+        },
+        reference: {
+          ok: true,
+          missingExpected: [],
+          presentRejected: [],
+          metadataMismatches: [],
+          wordCount: { ok: true, actual: 12, min: 5, max: 50 },
+          noiseRatio: { ok: true, ratio: 0, matched: [] },
+        },
+      },
+      metadata: { chidori: {}, reference: {} },
+    },
+  ]);
+
+  const markdown = renderMarkdown(report);
+
+  assert.match(markdown, /missing:\n    ````\n    missing `image`\n    with ```fence```\n    ````/);
+  assert.match(markdown, /rejected present:\n    ```\n    <img alt="bad"\n    src="data:image\/gif;base64,abc`123">\n    ```/);
+  assert.match(markdown, /metadata title:\n    expected:\n    ```\n    Expected `Title`\n    line two\n    ```/);
+  assert.match(markdown, /actual:\n    ````\n    Actual ```Title```\n    ````/);
+});
