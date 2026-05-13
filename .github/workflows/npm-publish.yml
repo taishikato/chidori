@@ -8,6 +8,9 @@ on:
         required: true
         type: boolean
         default: true
+  push:
+    tags:
+      - "v*.*.*"
 
 permissions:
   contents: read
@@ -21,6 +24,9 @@ jobs:
   verify:
     name: Verify release inputs
     runs-on: ubuntu-latest
+    outputs:
+      dry_run: ${{ steps.release-mode.outputs.dry_run }}
+      publish: ${{ steps.release-mode.outputs.publish }}
 
     steps:
       - name: Check out repository
@@ -44,16 +50,54 @@ jobs:
       - name: Use npm with trusted publishing support
         run: npm install -g npm@11.10.0
 
-      - name: Verify release branch
-        if: ${{ !inputs.dry_run }}
+      - name: Determine release mode
+        id: release-mode
+        env:
+          MANUAL_DRY_RUN: ${{ inputs.dry_run || 'false' }}
         run: |
-          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
-            echo "Publishing is only allowed from main. Current ref: $GITHUB_REF"
-            exit 1
-          fi
+          case "$GITHUB_EVENT_NAME" in
+            workflow_dispatch)
+              if [ "$MANUAL_DRY_RUN" != "true" ]; then
+                echo "Manual publish is disabled. Push a v*.*.* tag to publish."
+                exit 1
+              fi
+              echo "dry_run=true" >> "$GITHUB_OUTPUT"
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              ;;
+            push)
+              if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+                echo "Publish workflow push events must be tags. Current ref type: $GITHUB_REF_TYPE"
+                exit 1
+              fi
+              if [ "$GITHUB_ACTOR" != "taishikato" ]; then
+                echo "Only taishikato can publish. Current actor: $GITHUB_ACTOR"
+                exit 1
+              fi
+
+              TAG_VERSION="${GITHUB_REF_NAME#v}"
+              PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+              if [ "$TAG_VERSION" != "$PACKAGE_VERSION" ]; then
+                echo "Tag version $TAG_VERSION does not match package.json $PACKAGE_VERSION"
+                exit 1
+              fi
+
+              git fetch --no-tags --depth=1 origin main
+              if ! git merge-base --is-ancestor HEAD origin/main; then
+                echo "Tagged commit must be reachable from origin/main."
+                exit 1
+              fi
+
+              echo "dry_run=false" >> "$GITHUB_OUTPUT"
+              echo "publish=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Unsupported event: $GITHUB_EVENT_NAME"
+              exit 1
+              ;;
+          esac
 
       - name: Verify package versions are unpublished
-        if: ${{ !inputs.dry_run }}
+        if: ${{ steps.release-mode.outputs.publish == 'true' }}
         run: |
           VERSION="$(node -p "require('./package.json').version")"
           PACKAGES="$(node - <<'NODE'
@@ -144,7 +188,7 @@ jobs:
         run: npm install -g npm@11.10.0
 
       - name: Use dry-run package version
-        if: ${{ inputs.dry_run }}
+        if: ${{ needs.verify.outputs.dry_run == 'true' }}
         shell: bash
         run: |
           CURRENT_VERSION="$(node -p "require('./package.json').version")"
@@ -161,11 +205,11 @@ jobs:
         run: npm pack "./npm/${{ matrix.path }}" --dry-run
 
       - name: Dry-run platform publish
-        if: ${{ inputs.dry_run }}
+        if: ${{ needs.verify.outputs.dry_run == 'true' }}
         run: npm publish "./npm/${{ matrix.path }}" --dry-run --tag dry-run --access public
 
       - name: Publish platform package
-        if: ${{ !inputs.dry_run }}
+        if: ${{ needs.verify.outputs.publish == 'true' }}
         run: npm publish "./npm/${{ matrix.path }}" --access public
 
   publish-main-package:
@@ -191,7 +235,7 @@ jobs:
         run: npm install -g npm@11.10.0
 
       - name: Use dry-run package version
-        if: ${{ inputs.dry_run }}
+        if: ${{ needs.verify.outputs.dry_run == 'true' }}
         run: |
           CURRENT_VERSION="$(node -p "require('./package.json').version")"
           DRY_RUN_VERSION="${CURRENT_VERSION}-dry-run.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
@@ -202,9 +246,9 @@ jobs:
         run: npm pack --dry-run
 
       - name: Dry-run publish
-        if: ${{ inputs.dry_run }}
+        if: ${{ needs.verify.outputs.dry_run == 'true' }}
         run: npm publish --dry-run --tag dry-run
 
       - name: Publish to npm
-        if: ${{ !inputs.dry_run }}
+        if: ${{ needs.verify.outputs.publish == 'true' }}
         run: npm publish

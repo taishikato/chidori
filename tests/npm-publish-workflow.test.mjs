@@ -11,8 +11,20 @@ test("npm publish workflow publishes scoped platform packages with trusted publi
 
   assert.match(workflow, /^name:\s*Publish npm package$/m);
   assert.match(workflow, /^\s*workflow_dispatch:/m);
+  assert.match(workflow, /^\s*push:/m);
+  assert.match(workflow, /^\s*tags:/m);
+  assert.match(workflow, /-\s*"v\*\.\*\.\*"/);
   assert.match(workflow, /^\s*id-token:\s*write$/m);
   assert.match(workflow, /^\s*contents:\s*read$/m);
+  assert.match(workflow, /dry_run:\s*\$\{\{ steps\.release-mode\.outputs\.dry_run \}\}/);
+  assert.match(workflow, /publish:\s*\$\{\{ steps\.release-mode\.outputs\.publish \}\}/);
+  assert.match(workflow, /Manual publish is disabled/);
+  assert.match(workflow, /GITHUB_ACTOR" != "taishikato"/);
+  assert.match(workflow, /Only taishikato can publish/);
+  assert.match(workflow, /TAG_VERSION="\$\{GITHUB_REF_NAME#v\}"/);
+  assert.match(workflow, /Tag version \$TAG_VERSION does not match package\.json \$PACKAGE_VERSION/);
+  assert.match(workflow, /git fetch --no-tags --depth=1 origin main/);
+  assert.match(workflow, /git merge-base --is-ancestor HEAD origin\/main/);
   assert.match(workflow, /node-version:\s*"24"/);
   assert.match(
     workflow,
@@ -38,6 +50,8 @@ test("npm publish workflow publishes scoped platform packages with trusted publi
     workflow,
     /node tools\/prepare-platform-package\.mjs --package "\$\{\{ matrix\.package \}\}" --directory "\$\{\{ matrix\.path \}\}" --binary "target\/release\/\$\{\{ matrix\.binary \}\}"/,
   );
+  assert.match(workflow, /if:\s*\$\{\{ needs\.verify\.outputs\.dry_run == 'true' \}\}/);
+  assert.match(workflow, /if:\s*\$\{\{ needs\.verify\.outputs\.publish == 'true' \}\}/);
   assert.match(workflow, /npm publish "\.\/npm\/\$\{\{ matrix\.path \}\}" --dry-run --tag dry-run --access public/);
   assert.match(workflow, /npm publish "\.\/npm\/\$\{\{ matrix\.path \}\}" --access public/);
   assert.match(workflow, /npm version "\$DRY_RUN_VERSION" --no-git-tag-version/);
