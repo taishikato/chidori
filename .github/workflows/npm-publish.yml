@@ -1,0 +1,84 @@
+name: Publish npm package
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run npm publish --dry-run instead of publishing"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish chidori-fetch
+    runs-on: ubuntu-latest
+    environment: npm-publish
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust stable
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Use Rust stable
+        run: rustup default stable
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+
+      - name: Use npm with trusted publishing support
+        run: npm install -g npm@latest
+
+      - name: Verify release branch
+        if: ${{ !inputs.dry_run }}
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "Publishing is only allowed from main. Current ref: $GITHUB_REF"
+            exit 1
+          fi
+
+      - name: Verify package version is unpublished
+        if: ${{ !inputs.dry_run }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          if npm view "chidori-fetch@$VERSION" version >/dev/null 2>&1; then
+            echo "chidori-fetch@$VERSION is already published."
+            exit 1
+          fi
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test Rust package
+        run: npm test
+
+      - name: Test release workflow
+        run: node --test tests/npm-publish-workflow.test.mjs
+
+      - name: Preview package contents
+        run: npm pack --dry-run
+
+      - name: Dry-run publish
+        if: ${{ inputs.dry_run }}
+        run: npm publish --dry-run
+
+      - name: Publish to npm
+        if: ${{ !inputs.dry_run }}
+        run: npm publish
