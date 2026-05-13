@@ -5,12 +5,12 @@ const { join, dirname } = require("node:path");
 
 const root = dirname(__dirname);
 const platformPackages = new Map([
-  ["darwin-arm64", "chidori-fetch-darwin-arm64"],
-  ["darwin-x64", "chidori-fetch-darwin-x64"],
-  ["linux-arm64", "chidori-fetch-linux-arm64"],
-  ["linux-x64", "chidori-fetch-linux-x64"],
-  ["win32-arm64", "chidori-fetch-win32-arm64"],
-  ["win32-x64", "chidori-fetch-win32-x64"],
+  ["darwin-arm64", "@chidori-fetch/darwin-arm64"],
+  ["darwin-x64", "@chidori-fetch/darwin-x64"],
+  ["linux-arm64", "@chidori-fetch/linux-arm64"],
+  ["linux-x64", "@chidori-fetch/linux-x64"],
+  ["win32-arm64", "@chidori-fetch/win32-arm64"],
+  ["win32-x64", "@chidori-fetch/win32-x64"],
 ]);
 
 function binaryFileName(platform = process.platform) {

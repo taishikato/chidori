@@ -22,9 +22,9 @@ test("launcher maps supported Node platforms to npm platform package names", () 
 
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), {
-    darwinArm64: "chidori-fetch-darwin-arm64",
-    linuxX64: "chidori-fetch-linux-x64",
-    win32Arm64: "chidori-fetch-win32-arm64",
+    darwinArm64: "@chidori-fetch/darwin-arm64",
+    linuxX64: "@chidori-fetch/linux-x64",
+    win32Arm64: "@chidori-fetch/win32-arm64",
     unsupported: null,
   });
 });
@@ -36,14 +36,14 @@ test("launcher resolves the optional platform package before local cargo build o
       root: "/repo",
       platform: "linux",
       arch: "x64",
-      resolvePackageBinary: () => "/repo/node_modules/chidori-fetch-linux-x64/bin/chidori",
+      resolvePackageBinary: () => "/repo/node_modules/@chidori-fetch/linux-x64/bin/chidori",
       pathExists: () => true,
     });
     console.log(binary);
   `);
 
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout.trim(), "/repo/node_modules/chidori-fetch-linux-x64/bin/chidori");
+  assert.equal(result.stdout.trim(), "/repo/node_modules/@chidori-fetch/linux-x64/bin/chidori");
 });
 
 test("launcher falls back to local cargo build outputs for repository development", () => {

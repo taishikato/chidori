@@ -96,22 +96,28 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - package: chidori-fetch-darwin-arm64
+          - package: "@chidori-fetch/darwin-arm64"
+            path: darwin-arm64
             runner: macos-15
             binary: chidori
-          - package: chidori-fetch-darwin-x64
+          - package: "@chidori-fetch/darwin-x64"
+            path: darwin-x64
             runner: macos-15-intel
             binary: chidori
-          - package: chidori-fetch-linux-arm64
+          - package: "@chidori-fetch/linux-arm64"
+            path: linux-arm64
             runner: ubuntu-24.04-arm
             binary: chidori
-          - package: chidori-fetch-linux-x64
+          - package: "@chidori-fetch/linux-x64"
+            path: linux-x64
             runner: ubuntu-24.04
             binary: chidori
-          - package: chidori-fetch-win32-arm64
+          - package: "@chidori-fetch/win32-arm64"
+            path: win32-arm64
             runner: windows-11-arm
             binary: chidori.exe
-          - package: chidori-fetch-win32-x64
+          - package: "@chidori-fetch/win32-x64"
+            path: win32-x64
             runner: windows-2025
             binary: chidori.exe
 
@@ -149,18 +155,20 @@ jobs:
         run: cargo build --release
 
       - name: Prepare platform package
-        run: node tools/prepare-platform-package.mjs --package "${{ matrix.package }}" --binary "target/release/${{ matrix.binary }}"
+        run: node tools/prepare-platform-package.mjs --package "${{ matrix.package }}" --directory "${{ matrix.path }}" --binary "target/release/${{ matrix.binary }}"
 
       - name: Preview platform package contents
-        run: npm pack "./npm/${{ matrix.package }}" --dry-run
+        run: npm pack "./npm/${{ matrix.path }}" --dry-run
 
       - name: Dry-run platform publish
         if: ${{ inputs.dry_run }}
-        run: npm publish "./npm/${{ matrix.package }}" --dry-run --tag dry-run
+        run: npm publish "./npm/${{ matrix.path }}" --dry-run --tag dry-run --access public
 
       - name: Publish platform package
         if: ${{ !inputs.dry_run }}
-        run: npm publish "./npm/${{ matrix.package }}"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish "./npm/${{ matrix.path }}" --access public
 
   publish-main-package:
     name: Publish chidori-fetch

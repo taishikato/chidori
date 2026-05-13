@@ -25,22 +25,32 @@ async function writeJson(path, value) {
 
 const packageJson = await readJson(packageJsonPath);
 const entries = await readdir(npmRoot, { withFileTypes: true });
-const platformPackageNames = entries
-  .filter((entry) => entry.isDirectory() && entry.name.startsWith("chidori-fetch-"))
-  .map((entry) => entry.name)
-  .sort();
+const platformPackages = [];
+
+for (const entry of entries) {
+  if (!entry.isDirectory()) {
+    continue;
+  }
+
+  const platformPackageJsonPath = resolve(npmRoot, entry.name, "package.json");
+  const platformPackageJson = await readJson(platformPackageJsonPath);
+  if (platformPackageJson.name?.startsWith("@chidori-fetch/")) {
+    platformPackages.push({ directory: entry.name, packageJson: platformPackageJson });
+  }
+}
+
+platformPackages.sort((left, right) => left.packageJson.name.localeCompare(right.packageJson.name));
 
 packageJson.version = version;
 packageJson.optionalDependencies = Object.fromEntries(
-  platformPackageNames.map((name) => [name, version]),
+  platformPackages.map(({ packageJson }) => [packageJson.name, version]),
 );
 await writeJson(packageJsonPath, packageJson);
 
-for (const name of platformPackageNames) {
-  const platformPackageJsonPath = resolve(npmRoot, name, "package.json");
-  const platformPackageJson = await readJson(platformPackageJsonPath);
-  platformPackageJson.version = version;
-  await writeJson(platformPackageJsonPath, platformPackageJson);
+for (const { directory, packageJson } of platformPackages) {
+  const platformPackageJsonPath = resolve(npmRoot, directory, "package.json");
+  packageJson.version = version;
+  await writeJson(platformPackageJsonPath, packageJson);
 }
 
 console.log(`Synchronized npm package versions to ${version}`);

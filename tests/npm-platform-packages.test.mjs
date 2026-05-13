@@ -6,12 +6,12 @@ const rootPackagePath = new URL("../package.json", import.meta.url);
 const platformRoot = new URL("../npm/", import.meta.url);
 
 const platforms = [
-  { name: "chidori-fetch-darwin-arm64", os: "darwin", cpu: "arm64", binary: "chidori" },
-  { name: "chidori-fetch-darwin-x64", os: "darwin", cpu: "x64", binary: "chidori" },
-  { name: "chidori-fetch-linux-arm64", os: "linux", cpu: "arm64", binary: "chidori" },
-  { name: "chidori-fetch-linux-x64", os: "linux", cpu: "x64", binary: "chidori" },
-  { name: "chidori-fetch-win32-arm64", os: "win32", cpu: "arm64", binary: "chidori.exe" },
-  { name: "chidori-fetch-win32-x64", os: "win32", cpu: "x64", binary: "chidori.exe" },
+  { name: "@chidori-fetch/darwin-arm64", path: "darwin-arm64", os: "darwin", cpu: "arm64", binary: "chidori" },
+  { name: "@chidori-fetch/darwin-x64", path: "darwin-x64", os: "darwin", cpu: "x64", binary: "chidori" },
+  { name: "@chidori-fetch/linux-arm64", path: "linux-arm64", os: "linux", cpu: "arm64", binary: "chidori" },
+  { name: "@chidori-fetch/linux-x64", path: "linux-x64", os: "linux", cpu: "x64", binary: "chidori" },
+  { name: "@chidori-fetch/win32-arm64", path: "win32-arm64", os: "win32", cpu: "arm64", binary: "chidori.exe" },
+  { name: "@chidori-fetch/win32-x64", path: "win32-x64", os: "win32", cpu: "x64", binary: "chidori.exe" },
 ];
 
 function readJson(url) {
@@ -36,7 +36,7 @@ test("platform package manifests are publishable OS and CPU filtered packages", 
   const rootPackage = readJson(rootPackagePath);
 
   for (const platform of platforms) {
-    const packagePath = new URL(`${platform.name}/package.json`, platformRoot);
+    const packagePath = new URL(`${platform.path}/package.json`, platformRoot);
 
     assert.equal(existsSync(packagePath), true, `missing ${platform.name}/package.json`);
 

@@ -1,7 +1,7 @@
 {
-  "name": "chidori-fetch-darwin-arm64",
+  "name": "@chidori-fetch/win32-arm64",
   "version": "0.1.7",
-  "description": "Prebuilt chidori-fetch binary for macOS arm64",
+  "description": "Prebuilt chidori-fetch binary for Windows arm64",
   "homepage": "https://github.com/taishikato/chidori#readme",
   "repository": {
     "type": "git",
@@ -11,13 +11,13 @@
     "url": "https://github.com/taishikato/chidori/issues"
   },
   "bin": {
-    "chidori": "bin/chidori"
+    "chidori": "bin/chidori.exe"
   },
   "files": [
     "bin"
   ],
   "os": [
-    "darwin"
+    "win32"
   ],
   "cpu": [
     "arm64"

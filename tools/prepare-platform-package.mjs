@@ -13,14 +13,15 @@ function valueAfter(name) {
 }
 
 const packageName = valueAfter("--package");
+const packageDirectory = valueAfter("--directory") ?? packageName;
 const binary = valueAfter("--binary");
 
 if (!packageName || !binary) {
-  console.error("Usage: prepare-platform-package.mjs --package NAME --binary PATH");
+  console.error("Usage: prepare-platform-package.mjs --package NAME [--directory PATH] --binary PATH");
   process.exit(2);
 }
 
-const packageRoot = resolve(root, "npm", packageName);
+const packageRoot = resolve(root, "npm", packageDirectory);
 const packageJsonPath = resolve(packageRoot, "package.json");
 const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
 

@@ -1,7 +1,7 @@
 {
-  "name": "chidori-fetch-linux-x64",
+  "name": "@chidori-fetch/win32-x64",
   "version": "0.1.7",
-  "description": "Prebuilt chidori-fetch binary for Linux x64",
+  "description": "Prebuilt chidori-fetch binary for Windows x64",
   "homepage": "https://github.com/taishikato/chidori#readme",
   "repository": {
     "type": "git",
@@ -11,13 +11,13 @@
     "url": "https://github.com/taishikato/chidori/issues"
   },
   "bin": {
-    "chidori": "bin/chidori"
+    "chidori": "bin/chidori.exe"
   },
   "files": [
     "bin"
   ],
   "os": [
-    "linux"
+    "win32"
   ],
   "cpu": [
     "x64"
