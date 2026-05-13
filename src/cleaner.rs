@@ -655,7 +655,28 @@ fn is_metadata_token(token: String) -> bool {
 }
 
 fn has_byline_cue(text: &str) -> bool {
-    text.starts_with("by ") || text.contains(" by ") || text.contains("written by")
+    if text.contains("written by") {
+        return true;
+    }
+
+    let Some(rest) = text.strip_prefix("by ") else {
+        return text.contains(" by ");
+    };
+    let author_words = rest
+        .split(['·', '|', '-'])
+        .next()
+        .unwrap_or(rest)
+        .split_whitespace()
+        .take(4)
+        .collect::<Vec<_>>();
+
+    !author_words.is_empty()
+        && author_words.len() <= 3
+        && author_words.iter().all(|word| {
+            word.chars()
+                .next()
+                .is_some_and(|ch| ch.is_ascii_alphabetic())
+        })
 }
 
 fn has_read_time_cue(text: &str) -> bool {

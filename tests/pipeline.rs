@@ -2008,6 +2008,7 @@ fn cleanup_keeps_short_body_text_that_mentions_share_or_month_names() {
       <h1>False Positive Guard</h1>
       <p>May I share?</p>
       <p>2026 mattered.</p>
+      <p>By 2024 teams were relying on post-quantum migration plans.</p>
       <section class="field-notes">
         <h2>Newsletter strategy</h2>
         <p>The article compares newsletter strategy and product category design.</p>
@@ -2019,6 +2020,13 @@ fn cleanup_keeps_short_body_text_that_mentions_share_or_month_names() {
 
     assert!(result.html.contains("May I share?"), "{}", result.html);
     assert!(result.html.contains("2026 mattered."), "{}", result.html);
+    assert!(
+        result
+            .html
+            .contains("By 2024 teams were relying on post-quantum migration plans."),
+        "{}",
+        result.html
+    );
     assert!(
         result.html.contains("Newsletter strategy"),
         "{}",

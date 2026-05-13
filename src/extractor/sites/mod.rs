@@ -3,6 +3,7 @@ use crate::{document::ParsedDocument, error::ChidoriError};
 use super::types::{SiteExtraction, SiteExtractor};
 
 mod common;
+mod discourse;
 mod github;
 mod known;
 mod mastodon;
@@ -17,6 +18,7 @@ const SITE_EXTRACTORS: &[SiteExtractor] = &[
     mastodon::extract,
     github::extract,
     social::extract,
+    discourse::extract,
     known::extract,
     reddit::extract,
 ];

@@ -13,6 +13,8 @@ pub enum RenderMode {
 pub struct DebugDiagnostics {
     pub extraction_path: String,
     pub fallbacks: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub renderer_failures: Vec<String>,
     pub word_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_selector: Option<String>,

@@ -537,6 +537,182 @@ This fallback markdown body came from the bot user agent.
 }
 
 #[tokio::test]
+async fn render_auto_debug_reports_renderer_failure_reason() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/spa-shell"))
+        .respond_with(html_response(
+            r#"
+            <html>
+              <head><title>Renderer Shell</title></head>
+              <body>
+                <div id="app"></div>
+                <script>hydrate()</script>
+              </body>
+            </html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/spa-shell", server.uri()))
+        .arg("--render=auto")
+        .arg("--json")
+        .arg("--debug")
+        .env(
+            "CHIDORI_RENDER_COMMAND",
+            "chidori-renderer-command-that-does-not-exist",
+        )
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("renderer"),
+        "expected stderr to mention renderer failure\n\n{stderr}"
+    );
+    assert!(
+        stderr.contains("No such file") || stderr.contains("not found"),
+        "expected stderr to include the spawn failure reason\n\n{stderr}"
+    );
+}
+
+#[tokio::test]
+async fn json_debug_records_renderer_failure_before_bot_fallback() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/renderer-then-bot"))
+        .and(header("user-agent", DEFAULT_USER_AGENT))
+        .respond_with(html_response(
+            r#"<html><head><title>Renderer Then Bot</title></head><body><div id="app"></div><script>hydrate()</script></body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/renderer-then-bot"))
+        .and(header("user-agent", BOT_USER_AGENT))
+        .respond_with(html_response(
+            r#"
+            <html><head><title>Renderer Then Bot</title></head><body>
+              <article>
+                <h1>Renderer Then Bot</h1>
+                <p>The bot fallback should still succeed after the renderer command fails.</p>
+              </article>
+            </body></html>
+            "#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/renderer-then-bot", server.uri()))
+        .arg("--render=auto")
+        .arg("--json")
+        .arg("--debug")
+        .env(
+            "CHIDORI_RENDER_COMMAND",
+            "chidori-renderer-command-that-does-not-exist",
+        )
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["debug"]["fallbacks"][0], "bot-user-agent");
+    let renderer_failures = json["debug"]["rendererFailures"].as_array().unwrap();
+    assert_eq!(renderer_failures.len(), 1);
+    let failure = renderer_failures[0].as_str().unwrap();
+    assert!(failure.contains("renderer"), "{failure}");
+    assert!(
+        failure.contains("No such file") || failure.contains("not found"),
+        "{failure}"
+    );
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn json_debug_does_not_report_renderer_failure_when_rendered_extraction_fails() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/rendered-shell-then-bot"))
+        .and(header("user-agent", DEFAULT_USER_AGENT))
+        .respond_with(html_response(
+            r#"<html><head><title>Rendered Shell Then Bot</title></head><body><div id="app"></div><script>hydrate()</script></body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/rendered-shell-then-bot"))
+        .and(header("user-agent", BOT_USER_AGENT))
+        .respond_with(html_response(
+            r#"
+            <html><head><title>Rendered Shell Then Bot</title></head><body>
+              <article>
+                <h1>Rendered Shell Then Bot</h1>
+                <p>The bot fallback should still succeed after rendered HTML is unextractable.</p>
+              </article>
+            </body></html>
+            "#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let dir = tempdir().unwrap();
+    let renderer = dir.path().join("shell-renderer.sh");
+    std::fs::write(
+        &renderer,
+        r#"#!/bin/sh
+cat <<'HTML'
+<html><head><title>Rendered Shell</title></head><body><div id="root"></div><script>hydrate()</script></body></html>
+HTML
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&renderer).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&renderer, permissions).unwrap();
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/rendered-shell-then-bot", server.uri()))
+        .arg("--render=auto")
+        .arg("--json")
+        .arg("--debug")
+        .env("CHIDORI_RENDER_COMMAND", &renderer)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["debug"]["fallbacks"][0], "bot-user-agent");
+    assert!(
+        json["debug"]["rendererFailures"].is_null()
+            || json["debug"]["rendererFailures"]
+                .as_array()
+                .is_some_and(Vec::is_empty),
+        "{}",
+        json["debug"]
+    );
+    assert!(json["markdown"]
+        .as_str()
+        .unwrap()
+        .contains("The bot fallback should still succeed"));
+}
+
+#[tokio::test]
 async fn json_debug_records_hidden_content_fallback() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

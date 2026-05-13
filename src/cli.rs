@@ -269,6 +269,7 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
     let (mut doc, parse_ms) =
         parse_document_with_profile(page.body, document_url(&config, &page.final_url));
     let mut fallback_steps = Vec::new();
+    let mut renderer_failures = Vec::new();
     let extraction = match extract_markdown_from_doc(&doc, &config) {
         Ok(mut extraction) => {
             extraction.profile.parse_ms = parse_ms;
@@ -298,25 +299,40 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
                     input_url,
                     fetch_config.timeout,
                     fetch_config.max_bytes,
-                )
-                .and_then(|rendered_html| {
-                    let rendered_url = document_url(&config, &page.final_url);
-                    let (rendered_doc, parse_ms) =
-                        parse_document_with_profile(rendered_html, rendered_url);
-                    extract_markdown_from_doc(&rendered_doc, &config).map(|mut extraction| {
-                        extraction.profile.parse_ms = parse_ms;
-                        (rendered_doc, extraction)
-                    })
-                }) {
-                    Ok((rendered_doc, extraction)) => {
-                        fallback_steps.push("external-renderer".to_string());
-                        doc = rendered_doc;
-                        extraction
+                ) {
+                    Ok(rendered_html) => {
+                        let rendered_url = document_url(&config, &page.final_url);
+                        let (rendered_doc, parse_ms) =
+                            parse_document_with_profile(rendered_html, rendered_url);
+                        match extract_markdown_from_doc(&rendered_doc, &config) {
+                            Ok(mut extraction) => {
+                                extraction.profile.parse_ms = parse_ms;
+                                fallback_steps.push("external-renderer".to_string());
+                                doc = rendered_doc;
+                                extraction
+                            }
+                            Err(error) if config.user_agent.is_none() => {
+                                if config.debug {
+                                    eprintln!("debug: rendered extraction failed: {error}");
+                                }
+                                fallback_steps.push("bot-user-agent".to_string());
+                                retry_with_bot_user_agent(
+                                    &config,
+                                    &fetch_config,
+                                    &mut page.final_url,
+                                    &mut doc,
+                                )
+                                .await?
+                            }
+                            Err(error) => return Err(error),
+                        }
                     }
                     Err(error) if config.user_agent.is_none() => {
+                        let renderer_failure = renderer_failure_diagnostic(&error);
                         if config.debug {
-                            eprintln!("debug: external renderer failed: {}", error);
+                            eprintln!("debug: {renderer_failure}");
                         }
+                        renderer_failures.push(renderer_failure);
                         fallback_steps.push("bot-user-agent".to_string());
                         retry_with_bot_user_agent(
                             &config,
@@ -326,7 +342,12 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
                         )
                         .await?
                     }
-                    Err(error) => return Err(error),
+                    Err(error) => {
+                        if config.debug {
+                            eprintln!("debug: {}", renderer_failure_diagnostic(&error));
+                        }
+                        return Err(error);
+                    }
                 }
             } else if config.user_agent.is_none() {
                 fallback_steps.push("bot-user-agent".to_string());
@@ -378,6 +399,7 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
     let debug = config.debug.then(|| crate::output::DebugDiagnostics {
         extraction_path: extraction.path.to_string(),
         fallbacks: fallback_steps,
+        renderer_failures,
         word_count: metadata.word_count,
         content_selector: extraction.content_selector.clone(),
         content_score: extraction.content_score,
@@ -468,9 +490,11 @@ fn render_with_external_command(
             }
         });
     }
-    let mut child = command
-        .spawn()
-        .map_err(|error| ChidoriError::FetchFailed(error.to_string()))?;
+    let mut child = command.spawn().map_err(|error| {
+        ChidoriError::FetchFailed(format!(
+            "renderer command `{program}` failed to start: {error}"
+        ))
+    })?;
     let stdout = child
         .stdout
         .take()
@@ -599,6 +623,10 @@ fn renderer_exit_error(
     }
 
     ChidoriError::FetchFailed(format!("renderer exited with status {status}: {stderr}"))
+}
+
+fn renderer_failure_diagnostic(error: &ChidoriError) -> String {
+    format!("external renderer failed: {error}")
 }
 
 fn terminate_renderer(child: &mut std::process::Child) {
