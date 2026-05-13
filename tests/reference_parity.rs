@@ -11,7 +11,7 @@ fn fixture_to_markdown(fixture: &str, url: &str) -> String {
     let html = std::fs::read_to_string(format!("tests/fixtures/reference/{fixture}")).unwrap();
     let doc = ParsedDocument::parse(html, Url::parse(url).unwrap());
     let main = extract_main_html(&doc).unwrap();
-    let cleaned = clean_html(&main, &CleanOptions { no_images: false });
+    let cleaned = clean_html(&main, &CleanOptions::new(false));
 
     html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None })
 }

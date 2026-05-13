@@ -56,6 +56,12 @@ pub struct Cli {
     #[arg(long, help = "Remove images from Markdown output")]
     pub no_images: bool,
 
+    #[arg(
+        long,
+        help = "Keep content-pattern cleanup blocks such as newsletters, share widgets, and read-time metadata"
+    )]
+    pub no_content_patterns: bool,
+
     #[arg(long, help = "Emit extraction diagnostics and timing information")]
     pub debug: bool,
 
@@ -82,6 +88,7 @@ pub struct RunConfig {
     pub user_agent: Option<String>,
     pub lang: Option<String>,
     pub no_images: bool,
+    pub content_patterns: bool,
     pub debug: bool,
     pub selector: Option<String>,
     pub profile: bool,
@@ -161,6 +168,7 @@ impl TryFrom<Cli> for RunConfig {
             user_agent: cli.user_agent,
             lang: cli.lang,
             no_images: cli.no_images,
+            content_patterns: !cli.no_content_patterns,
             debug: cli.debug,
             selector: cli.selector,
             profile: cli.profile,
@@ -834,12 +842,17 @@ fn extract_markdown_from_doc(
             .iter()
             .any(|fallback| fallback == "hidden-content")
         {
-            crate::cleaner::clean_html_preserving_hidden_with_report(
+            crate::cleaner::clean_html_preserving_hidden_with_report_and_patterns(
                 &standardized.html,
                 &clean_options,
+                config.content_patterns,
             )
         } else {
-            crate::cleaner::clean_html_with_report(&standardized.html, &clean_options)
+            crate::cleaner::clean_html_with_report_and_patterns(
+                &standardized.html,
+                &clean_options,
+                config.content_patterns,
+            )
         };
         profile.clean_ms = clean_started.elapsed().as_millis();
 

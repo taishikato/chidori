@@ -933,6 +933,37 @@ async fn no_images_removes_image_markdown() {
 }
 
 #[tokio::test]
+async fn no_content_patterns_keeps_pattern_blocks() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/content-patterns"))
+        .respond_with(html_response(
+            r#"
+            <html><body><article>
+              <h1>Pattern Flag Article</h1>
+              <p>Text survives.</p>
+              <section class="newsletter-signup">
+                <h2>Subscribe to our newsletter</h2>
+                <p>Get weekly updates.</p>
+              </section>
+            </article></body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/content-patterns", server.uri()))
+        .arg("--no-content-patterns")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Text survives."))
+        .stdout(predicate::str::contains("Subscribe to our newsletter"))
+        .stdout(predicate::str::contains("Get weekly updates."))
+        .stderr(predicate::str::is_empty());
+}
+
+#[tokio::test]
 async fn debug_emits_diagnostics_to_stderr_without_polluting_stdout() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

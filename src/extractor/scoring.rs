@@ -131,8 +131,7 @@ fn score_element_with_visibility(
 }
 
 fn text_without_invisible_nodes(html: &str) -> String {
-    let cleaned =
-        crate::cleaner::clean_html(html, &crate::cleaner::CleanOptions { no_images: false });
+    let cleaned = crate::cleaner::clean_html(html, &crate::cleaner::CleanOptions::new(false));
 
     scraper::Html::parse_fragment(&cleaned)
         .root_element()

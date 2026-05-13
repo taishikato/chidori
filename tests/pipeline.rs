@@ -13,7 +13,7 @@ fn fixture_to_markdown(name: &str) -> String {
     let html = std::fs::read_to_string(format!("tests/fixtures/{name}")).unwrap();
     let doc = ParsedDocument::parse(html, Url::parse("https://example.com").unwrap());
     let main = extract_main_html(&doc).unwrap();
-    let cleaned = clean_html(&main, &CleanOptions { no_images: false });
+    let cleaned = clean_html(&main, &CleanOptions::new(false));
     html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None })
 }
 
@@ -1665,7 +1665,7 @@ fn extracts_hacker_news_listing_items_as_readable_content() {
         Url::parse("https://news.ycombinator.com/news").unwrap(),
     );
     let main = extract_main_html(&doc).unwrap();
-    let cleaned = clean_html(&main, &CleanOptions { no_images: false });
+    let cleaned = clean_html(&main, &CleanOptions::new(false));
     let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
 
     assert!(
@@ -1744,7 +1744,7 @@ fn reddit_fallback_comments_keep_nested_replies_subordinate_and_unique() {
         Url::parse("https://www.reddit.com/r/rust/comments/abc123/example_post/").unwrap(),
     );
     let main = extract_main_html(&doc).unwrap();
-    let cleaned = clean_html(&main, &CleanOptions { no_images: false });
+    let cleaned = clean_html(&main, &CleanOptions::new(false));
     let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
 
     assert!(markdown.contains("u/parentuser"));
@@ -1851,7 +1851,7 @@ fn known_site_candidate_does_not_duplicate_title_already_inside_content() {
     let doc = ParsedDocument::parse(html, Url::parse("https://medium.com/acme/post").unwrap());
 
     let main = extract_main_content(&doc).unwrap();
-    let cleaned = clean_html(&main.html, &CleanOptions { no_images: false });
+    let cleaned = clean_html(&main.html, &CleanOptions::new(false));
     let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
 
     assert_eq!(markdown.matches("Medium Article Title").count(), 1);
@@ -1882,7 +1882,7 @@ fn repository_discussion_candidate_does_not_duplicate_primary_body_comment() {
     );
 
     let main = extract_main_content(&doc).unwrap();
-    let cleaned = clean_html(&main.html, &CleanOptions { no_images: false });
+    let cleaned = clean_html(&main.html, &CleanOptions::new(false));
     let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
 
     assert_eq!(
@@ -1906,7 +1906,7 @@ fn removes_noise_and_optionally_images() {
       <button>Share</button>
     </article>"#;
 
-    let cleaned = clean_html(html, &CleanOptions { no_images: true });
+    let cleaned = clean_html(html, &CleanOptions::new(true));
     assert!(cleaned.contains("Keep this paragraph."));
     assert!(!cleaned.contains("script"));
     assert!(!cleaned.contains("Related links"));
@@ -1923,7 +1923,7 @@ fn cleanup_report_counts_multiple_removed_elements() {
       <nav>Bottom navigation</nav>
     </article>"#;
 
-    let cleaned = clean_html_with_report(html, &CleanOptions { no_images: false });
+    let cleaned = clean_html_with_report(html, &CleanOptions::new(false));
     let nav_removal = cleaned
         .removals
         .iter()
@@ -1935,6 +1935,107 @@ fn cleanup_report_counts_multiple_removed_elements() {
 }
 
 #[test]
+fn cleanup_removes_metadata_newsletter_share_and_tags_blocks() {
+    let html = r#"
+    <article>
+      <header>
+        <h1>Pattern cleanup</h1>
+        <div class="article-meta">
+          <span>By Ada Lovelace</span>
+          <span>May 13, 2026</span>
+          <span>4 min read</span>
+        </div>
+        <p>2026-05-13</p>
+        <ul class="author-list"><li><a href="/authors/ada">Ada Lovelace</a></li></ul>
+        <div>8 min read</div>
+      </header>
+      <p>The useful article body should stay readable.</p>
+      <div class="share-tools">
+        <span>Share this article</span>
+        <a href="https://twitter.com/share">Twitter</a>
+        <a href="https://www.linkedin.com/shareArticle">LinkedIn</a>
+      </div>
+      <section class="newsletter-signup">
+        <h2>Subscribe to our newsletter</h2>
+        <p>Get weekly updates in your inbox.</p>
+      </section>
+      <div class="post-tags">
+        <span>Tags:</span>
+        <a href="/tags/rust">Rust</a>
+        <a href="/tags/cli">CLI</a>
+      </div>
+      <p>Another useful paragraph survives too.</p>
+    </article>"#;
+
+    let result = clean_html_with_report(html, &CleanOptions::new(false));
+
+    assert!(result.html.contains("Pattern cleanup"));
+    assert!(result
+        .html
+        .contains("The useful article body should stay readable."));
+    assert!(result
+        .html
+        .contains("Another useful paragraph survives too."));
+    assert!(!result.html.contains("By Ada Lovelace"));
+    assert!(!result.html.contains("2026-05-13"));
+    assert!(!result.html.contains("/authors/ada"));
+    assert!(!result.html.contains("4 min read"));
+    assert!(!result.html.contains("8 min read"));
+    assert!(!result.html.contains("Share this article"));
+    assert!(!result.html.contains("Subscribe to our newsletter"));
+    assert!(!result.html.contains("Tags:"));
+    assert!(result.removals.iter().any(|record| {
+        record.reason == "metadata-block" && record.text_preview.contains("Ada Lovelace")
+    }));
+    assert!(result
+        .removals
+        .iter()
+        .any(|record| record.reason == "share-widget"));
+    assert!(result
+        .removals
+        .iter()
+        .any(|record| record.reason == "newsletter-block"));
+    assert!(result
+        .removals
+        .iter()
+        .any(|record| record.reason == "tag-category-block"));
+}
+
+#[test]
+fn cleanup_keeps_short_body_text_that_mentions_share_or_month_names() {
+    let html = r#"
+    <article>
+      <h1>False Positive Guard</h1>
+      <p>May I share?</p>
+      <p>2026 mattered.</p>
+      <section class="field-notes">
+        <h2>Newsletter strategy</h2>
+        <p>The article compares newsletter strategy and product category design.</p>
+      </section>
+      <p>The durable body remains available for extraction.</p>
+    </article>"#;
+
+    let result = clean_html_with_report(html, &CleanOptions { no_images: false });
+
+    assert!(result.html.contains("May I share?"), "{}", result.html);
+    assert!(result.html.contains("2026 mattered."), "{}", result.html);
+    assert!(
+        result.html.contains("Newsletter strategy"),
+        "{}",
+        result.html
+    );
+    assert!(
+        result.html.contains("product category design"),
+        "{}",
+        result.html
+    );
+    assert!(result
+        .removals
+        .iter()
+        .all(|record| record.text_preview != "May I share?"));
+}
+
+#[test]
 fn removes_nested_noise_tags() {
     let html = r#"
     <article>
@@ -1942,7 +2043,7 @@ fn removes_nested_noise_tags() {
       <ASIDE><ASIDE>inner</ASIDE>outer</ASIDE>
     </article>"#;
 
-    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let cleaned = clean_html(html, &CleanOptions::new(false));
     assert!(cleaned.contains("Keep this paragraph."));
     assert!(!cleaned.contains("inner"));
     assert!(!cleaned.contains("outer"));
@@ -1960,7 +2061,7 @@ fn unwraps_javascript_links_without_losing_inner_content() {
       <p>Normal <a href="https://example.com">links</a> should stay linked.</p>
     </article>"#;
 
-    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let cleaned = clean_html(html, &CleanOptions::new(false));
     let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
 
     assert!(markdown.contains("This has a simple js link in a sentence."));
@@ -1979,7 +2080,7 @@ fn dom_cleanup_unwraps_javascript_links_without_dropping_nested_children() {
       </article>
     "#;
 
-    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let cleaned = clean_html(html, &CleanOptions::new(false));
 
     assert!(cleaned.contains("<strong>important</strong> text"));
     assert!(cleaned.contains("href=\"/real\""));
@@ -1999,7 +2100,7 @@ fn dom_cleanup_removes_nested_noise_as_subtrees() {
       </article>
     "#;
 
-    let result = clean_html_with_report(html, &CleanOptions { no_images: false });
+    let result = clean_html_with_report(html, &CleanOptions::new(false));
 
     assert!(result.html.contains("Primary article text survives."));
     assert!(!result.html.contains("First related card"));
@@ -2018,7 +2119,7 @@ fn cleaner_strips_dangerous_attributes_from_remaining_elements() {
       <img src="javascript:alert(1)" alt="Bad image">
     </article>"#;
 
-    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let cleaned = clean_html(html, &CleanOptions::new(false));
 
     assert!(cleaned.contains("Keep this paragraph."));
     assert!(!cleaned.contains("onclick"));
@@ -2034,7 +2135,7 @@ fn cleaner_strips_entity_encoded_dangerous_urls() {
       <img src="data&#58;text/html,<script>alert(1)</script>" alt="Encoded data URL">
     </article>"#;
 
-    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let cleaned = clean_html(html, &CleanOptions::new(false));
 
     assert!(cleaned.contains("Encoded JavaScript link"));
     assert!(cleaned.contains("Encoded data URL"));
@@ -2052,7 +2153,7 @@ fn cleaner_preserves_unquoted_root_relative_urls() {
       <img src=/hero/ alt=Hero>
     </article>"#;
 
-    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let cleaned = clean_html(html, &CleanOptions::new(false));
     let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
 
     assert!(markdown.contains("[Documentation](/docs/)"));
@@ -2066,7 +2167,7 @@ fn cleaner_preserves_unquoted_alt_before_self_closing_slash() {
       <img src=/hero.png alt=Hero/>
     </article>"#;
 
-    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let cleaned = clean_html(html, &CleanOptions::new(false));
     let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
 
     assert!(markdown.contains("![Hero](/hero.png)"));
@@ -2081,7 +2182,7 @@ fn cleaner_preserves_entity_encoded_attribute_values() {
       <img src="/images/diagram?size=large&amp;format=png" alt="A &amp; B diagram">
     </article>"#;
 
-    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let cleaned = clean_html(html, &CleanOptions::new(false));
     let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
 
     assert!(markdown.contains("[Search results](/search?q=rust&page=2)"));
@@ -2095,7 +2196,7 @@ fn srcset_preference_does_not_reintroduce_dangerous_image_urls() {
       <img src="/safe.png" srcset="javascript:alert(1) 1200w" alt="Safe diagram">
     </article>"#;
 
-    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let cleaned = clean_html(html, &CleanOptions::new(false));
     let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
 
     assert!(!markdown.contains("javascript:"));
@@ -2110,7 +2211,7 @@ fn cleaner_preserves_greater_than_inside_quoted_attributes() {
       <p data-note='a > b'>Keep single quoted comparison.</p>
     </article>"#;
 
-    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let cleaned = clean_html(html, &CleanOptions::new(false));
     let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
 
     assert!(cleaned.contains(r#"title="2 > 1""#));
@@ -2362,7 +2463,7 @@ fn removes_hidden_and_embedded_noise_elements() {
       <embed src="foo.swf">
     </article>"#;
 
-    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let cleaned = clean_html(html, &CleanOptions::new(false));
 
     assert!(cleaned.contains("Keep this visible paragraph."));
     assert!(!cleaned.contains("Hidden teaser"));
@@ -2382,7 +2483,7 @@ fn hidden_cleanup_does_not_match_attribute_text() {
       <p data-note="a hidden gem">Visible paragraph with attribute prose.</p>
     </article>"#;
 
-    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let cleaned = clean_html(html, &CleanOptions::new(false));
 
     assert!(cleaned.contains("Visible section with wording"));
     assert!(cleaned.contains("Visible paragraph with attribute prose."));
@@ -2398,7 +2499,7 @@ fn removes_breadcrumb_blocks_without_semantic_nav_tags() {
       <p>Not a shadowing day or research interview — a real job.</p>
     </main>"#;
 
-    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let cleaned = clean_html(html, &CleanOptions::new(false));
 
     assert!(cleaned.contains("Not a shadowing day"));
     assert!(!cleaned.contains("Home"));
@@ -2415,7 +2516,7 @@ fn removes_navigation_blocks_with_spaced_data_block_attribute() {
       <p>Visible paragraph survives.</p>
     </main>"#;
 
-    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let cleaned = clean_html(html, &CleanOptions::new(false));
 
     assert!(cleaned.contains("Visible paragraph survives."));
     assert!(!cleaned.contains("Home"));
@@ -2436,7 +2537,7 @@ fn removes_fragment_only_table_of_contents_lists() {
       <p>The system is installed as the sole operating system.</p>
     </article>"##;
 
-    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let cleaned = clean_html(html, &CleanOptions::new(false));
 
     assert!(cleaned.contains("The system is installed"));
     assert!(cleaned.contains("Start Here</h2>"));
@@ -2458,7 +2559,7 @@ fn keeps_short_fragment_link_lists_that_are_not_table_of_contents() {
       <p>Keep the API section.</p>
     </article>"##;
 
-    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let cleaned = clean_html(html, &CleanOptions::new(false));
 
     assert!(cleaned.contains("API compatibility note"));
     assert!(cleaned.contains("Migration footnote"));
@@ -2479,7 +2580,7 @@ fn keeps_descriptive_fragment_link_lists_that_are_not_table_of_contents() {
       <p>The tokenizer detail remains part of the article.</p>
     </article>"##;
 
-    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let cleaned = clean_html(html, &CleanOptions::new(false));
 
     assert!(cleaned.contains("the smallest pieces emitted"));
     assert!(cleaned.contains("how nested HTML nodes are assembled"));
@@ -2498,7 +2599,7 @@ fn removes_link_dense_related_sections() {
       </section>
     </article>"##;
 
-    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let cleaned = clean_html(html, &CleanOptions::new(false));
 
     assert!(cleaned.contains("Coffee cools following"));
     assert!(!cleaned.contains("Maybe there's a pattern"));
@@ -2518,7 +2619,7 @@ fn keeps_mid_article_link_dense_resource_sections() {
       <p>The next paragraph explains why those links matter to the implementation.</p>
     </article>"##;
 
-    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let cleaned = clean_html(html, &CleanOptions::new(false));
 
     assert!(cleaned.contains("Specification A"));
     assert!(cleaned.contains("Implementation guide"));
@@ -2551,7 +2652,7 @@ fn removes_related_card_sections_even_when_footer_follows() {
       </div>
     </body>"##;
 
-    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let cleaned = clean_html(html, &CleanOptions::new(false));
 
     assert!(cleaned.contains("Superpowers is a comprehensive"));
     assert!(cleaned.contains("Please execute the task as soon as you can"));
@@ -2574,7 +2675,7 @@ fn cleaner_removes_related_sections_with_nested_cards_without_string_reparse_los
     </article>
     "#;
 
-    let result = clean_html_with_report(html, &CleanOptions { no_images: false });
+    let result = clean_html_with_report(html, &CleanOptions::new(false));
 
     assert!(result.html.contains("Main text with"));
     assert!(result.html.contains("href=\"/real\""));
@@ -2599,7 +2700,7 @@ fn cleaner_keeps_article_text_when_related_cards_share_parent_wrapper() {
     </article>
     "#;
 
-    let result = clean_html_with_report(html, &CleanOptions { no_images: false });
+    let result = clean_html_with_report(html, &CleanOptions::new(false));
 
     assert!(result.html.contains("Main analysis that must remain"));
     assert!(!result.html.contains("Related One"));
@@ -2613,7 +2714,7 @@ fn cleaner_treats_non_ascii_less_than_text_as_text() {
     let html =
         "<article><p>Keep this.</p><p>It<’s text, not a tag.</p><p>Use <— as text.</p></article>";
 
-    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let cleaned = clean_html(html, &CleanOptions::new(false));
 
     assert!(cleaned.contains("It&lt;’s text"));
     assert!(cleaned.contains("Use &lt;— as text"));
@@ -2623,7 +2724,7 @@ fn cleaner_treats_non_ascii_less_than_text_as_text() {
 fn cleaner_preserves_ascii_less_than_comparison_text() {
     let html = "<article><p>Keep comparisons like value < 2 > 1 intact.</p></article>";
 
-    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let cleaned = clean_html(html, &CleanOptions::new(false));
     let markdown = html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None });
 
     assert!(cleaned.contains("value &lt; 2 &gt; 1"));
@@ -2638,7 +2739,7 @@ fn keeps_images_when_allowed() {
       <img src="/hero.png" alt="Hero">
     </article>"#;
 
-    let cleaned = clean_html(html, &CleanOptions { no_images: false });
+    let cleaned = clean_html(html, &CleanOptions::new(false));
     assert!(cleaned.contains("Keep this paragraph."));
     assert!(cleaned.contains("<img"));
 }
@@ -2718,7 +2819,7 @@ fn removes_picture_when_images_disabled() {
       </picture>
     </article>"#;
 
-    let cleaned = clean_html(html, &CleanOptions { no_images: true });
+    let cleaned = clean_html(html, &CleanOptions::new(true));
     assert!(cleaned.contains("Keep this paragraph."));
     assert!(!cleaned.contains("<picture"));
     assert!(!cleaned.contains("<source"));
