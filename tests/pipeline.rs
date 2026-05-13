@@ -105,6 +105,41 @@ fn markdown_preserves_all_images_inside_figure() {
 }
 
 #[test]
+fn collapses_block_link_text_to_single_line() {
+    let html = r#"
+    <article>
+      <a href="https://github.com/nuxt/docs/pull/1797">
+        <div>Pull Request #1797 · nuxt/docs</div>
+      </a>
+    </article>"#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert_eq!(
+        markdown,
+        "[Pull Request #1797 · nuxt/docs](https://github.com/nuxt/docs/pull/1797)"
+    );
+}
+
+#[test]
+fn collapses_block_link_text_after_non_link_bracket_text() {
+    let html = r#"
+    <article>
+      <p>Check items[0] before the contribution.</p>
+      <a href="https://github.com/nuxt/docs/pull/1797">
+        <div>Pull Request #1797 · nuxt/docs</div>
+      </a>
+    </article>"#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("Check items[0] before the contribution."));
+    assert!(
+        markdown
+            .contains("[Pull Request #1797 · nuxt/docs](https://github.com/nuxt/docs/pull/1797)"),
+        "{markdown}"
+    );
+}
+
+#[test]
 fn markdown_escapes_special_characters_in_figure_images() {
     let html = r#"
     <article>
@@ -1657,6 +1692,79 @@ fn uses_structured_body_when_visible_body_has_no_words() {
 }
 
 #[test]
+fn uses_job_posting_description_when_visible_body_has_no_words() {
+    let html = r#"
+    <html>
+      <head>
+        <script type="application/ld+json">
+          {
+            "@context": "https://schema.org",
+            "@type": "JobPosting",
+            "title": "Fullstack Software Engineer",
+            "description": "<h2><strong>About the Role</strong></h2><p>Build travel commerce engines for APAC partners with Scala and React.</p><ul><li><p>Design and operate full-stack APIs for high-scale partnerships.</p></li></ul>"
+          }
+        </script>
+      </head>
+      <body>
+        <div id="root"><div class="spinner"></div></div>
+      </body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://jobs.example.com/post").unwrap());
+
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("<h2><strong>About the Role</strong></h2>"));
+    assert!(main.contains("Build travel commerce engines"));
+    assert!(!main.contains("spinner"));
+}
+
+#[test]
+fn preserves_angle_brackets_in_plain_structured_body_fallback() {
+    let html = r#"
+    <html>
+      <head>
+        <script type="application/ld+json">
+          {
+            "@context": "https://schema.org",
+            "@type": "Article",
+            "articleBody": "Use Vec<T> and Result<T, E> when documenting Rust generics. This structured article text is long enough to become the fallback content for agents reading a schema-only page."
+          }
+        </script>
+      </head>
+      <body></body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("Vec&lt;T&gt;"));
+    assert!(main.contains("Result&lt;T, E&gt;"));
+}
+
+#[test]
+fn preserves_literal_html_tags_in_plain_structured_body_fallback() {
+    let html = r#"
+    <html>
+      <head>
+        <script type="application/ld+json">
+          {
+            "@context": "https://schema.org",
+            "@type": "Article",
+            "articleBody": "Use <p> tags and escape <div> examples when documenting HTML. This structured article text is long enough to become fallback content for agents reading schema-only pages."
+          }
+        </script>
+      </head>
+      <body></body>
+    </html>"#;
+    let doc = ParsedDocument::parse(html, Url::parse("https://example.com/post").unwrap());
+
+    let main = extract_main_html(&doc).unwrap();
+
+    assert!(main.contains("Use &lt;p&gt; tags"));
+    assert!(main.contains("escape &lt;div&gt; examples"));
+}
+
+#[test]
 fn extracts_hacker_news_listing_items_as_readable_content() {
     let html = std::fs::read_to_string("tests/fixtures/reference/domain--hacker-news-listing.html")
         .unwrap();
@@ -2994,6 +3102,22 @@ fn does_not_normalize_setext_inside_code_block() {
     assert!(markdown.contains("```\ntitle\n---\n```"));
     assert!(!markdown.contains("## title"));
     assert!(!markdown.contains("# title"));
+}
+
+#[test]
+fn does_not_collapse_multiline_links_inside_code_block() {
+    let html = r#"<article><pre><code class="language-md">[
+Pull Request #1797 · nuxt/docs
+](https://github.com/nuxt/docs/pull/1797)</code></pre></article>"#;
+
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(
+        markdown.contains(
+            "```md\n[\nPull Request #1797 · nuxt/docs\n](https://github.com/nuxt/docs/pull/1797)\n```"
+        ),
+        "{markdown}"
+    );
 }
 
 #[test]

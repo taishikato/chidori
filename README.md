@@ -28,7 +28,7 @@ chrome around it.
 ```
 
 ```bash
-npx chidori-fetch https://example.com/coffee-cooling
+npx chidori-fetch https://taishikato.com
 ```
 
 ````md

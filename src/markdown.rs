@@ -18,6 +18,7 @@ pub fn html_to_markdown(html: &str, options: &MarkdownOptions) -> String {
         .trim()
         .to_string();
     markdown = unwrap_soft_wrapped_paragraphs(&markdown);
+    markdown = collapse_multiline_link_labels(&markdown);
     markdown = normalize_setext_headings(&markdown);
     markdown = annotate_code_fences(&markdown, &code_block_languages);
     markdown = specialized.restore(markdown);
@@ -153,6 +154,110 @@ fn is_list_item_line(line: &str) -> bool {
         || line.starts_with("- ")
         || line.starts_with("+ ")
         || is_ordered_list_line(line)
+}
+
+fn collapse_multiline_link_labels(markdown: &str) -> String {
+    let mut output = String::with_capacity(markdown.len());
+    let mut pending = String::new();
+    let mut in_fence = false;
+
+    for line in markdown.split_inclusive('\n') {
+        let line_without_newline = line.trim_end_matches('\n');
+        if is_backtick_fence(line_without_newline) {
+            if !in_fence {
+                output.push_str(&collapse_multiline_link_labels_in_segment(&pending));
+                pending.clear();
+            }
+            output.push_str(line);
+            in_fence = !in_fence;
+        } else if in_fence {
+            output.push_str(line);
+        } else {
+            pending.push_str(line);
+        }
+    }
+
+    if !pending.is_empty() {
+        output.push_str(&collapse_multiline_link_labels_in_segment(&pending));
+    }
+
+    output
+}
+
+fn collapse_multiline_link_labels_in_segment(markdown: &str) -> String {
+    let mut output = String::with_capacity(markdown.len());
+    let mut index = 0;
+
+    while let Some(relative_start) = markdown[index..].find('[') {
+        let start = index + relative_start;
+        output.push_str(&markdown[index..start]);
+
+        if markdown[..start].ends_with('!') {
+            output.push('[');
+            index = start + '['.len_utf8();
+            continue;
+        }
+
+        let Some((label_end, url_end)) = inline_link_bounds(markdown, start) else {
+            output.push('[');
+            index = start + '['.len_utf8();
+            continue;
+        };
+
+        let label = &markdown[start + '['.len_utf8()..label_end];
+        if label.contains('\n') {
+            output.push('[');
+            output.push_str(&normalize_link_label(label));
+            output.push_str(&markdown[label_end..=url_end]);
+        } else {
+            output.push_str(&markdown[start..=url_end]);
+        }
+        index = url_end + ')'.len_utf8();
+    }
+
+    output.push_str(&markdown[index..]);
+    output
+}
+
+fn inline_link_bounds(markdown: &str, label_start: usize) -> Option<(usize, usize)> {
+    let mut escaped = false;
+    let mut nested_brackets = 0usize;
+
+    for (relative_offset, ch) in markdown[label_start + '['.len_utf8()..].char_indices() {
+        let offset = label_start + '['.len_utf8() + relative_offset;
+        if escaped {
+            escaped = false;
+            continue;
+        }
+
+        match ch {
+            '\\' => escaped = true,
+            '[' => nested_brackets += 1,
+            ']' if nested_brackets == 0 => {
+                let url_start = offset + ']'.len_utf8();
+                if markdown[url_start..].starts_with('(') {
+                    let url_end = markdown_url_end(markdown, url_start + '('.len_utf8())?;
+                    return Some((offset, url_end));
+                }
+            }
+            ']' => nested_brackets -= 1,
+            _ => {}
+        }
+    }
+
+    None
+}
+
+fn normalize_link_label(label: &str) -> String {
+    label
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 pub fn remove_markdown_images(markdown: &str) -> String {
