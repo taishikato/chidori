@@ -18,10 +18,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
-    name: Publish chidori-fetch
+  verify:
+    name: Verify release inputs
     runs-on: ubuntu-latest
-    environment: npm-publish
 
     steps:
       - name: Check out repository
@@ -53,14 +52,25 @@ jobs:
             exit 1
           fi
 
-      - name: Verify package version is unpublished
+      - name: Verify package versions are unpublished
         if: ${{ !inputs.dry_run }}
         run: |
           VERSION="$(node -p "require('./package.json').version")"
-          if npm view "chidori-fetch@$VERSION" version >/dev/null 2>&1; then
-            echo "chidori-fetch@$VERSION is already published."
-            exit 1
-          fi
+          PACKAGES="$(node - <<'NODE'
+          const packageJson = require('./package.json');
+          console.log([
+            packageJson.name,
+            ...Object.keys(packageJson.optionalDependencies ?? {}),
+          ].join('\n'));
+          NODE
+          )"
+
+          while IFS= read -r PACKAGE; do
+            if npm view "$PACKAGE@$VERSION" version >/dev/null 2>&1; then
+              echo "$PACKAGE@$VERSION is already published."
+              exit 1
+            fi
+          done <<< "$PACKAGES"
 
       - name: Check formatting
         run: npm run format:check
@@ -72,18 +82,122 @@ jobs:
         run: npm test
 
       - name: Test release workflow
-        run: node --test tests/npm-publish-workflow.test.mjs
+        run: node --test tests/*.test.mjs tools/*.test.mjs
 
-      - name: Preview package contents
+      - name: Preview root package contents
         run: npm pack --dry-run
 
-      - name: Dry-run publish
+  publish-platform-packages:
+    name: Publish ${{ matrix.package }}
+    needs: verify
+    runs-on: ${{ matrix.runner }}
+    environment: npm-publish
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: chidori-fetch-darwin-arm64
+            runner: macos-15
+            binary: chidori
+          - package: chidori-fetch-darwin-x64
+            runner: macos-15-intel
+            binary: chidori
+          - package: chidori-fetch-linux-arm64
+            runner: ubuntu-24.04-arm
+            binary: chidori
+          - package: chidori-fetch-linux-x64
+            runner: ubuntu-24.04
+            binary: chidori
+          - package: chidori-fetch-win32-arm64
+            runner: windows-11-arm
+            binary: chidori.exe
+          - package: chidori-fetch-win32-x64
+            runner: windows-2025
+            binary: chidori.exe
+
+    steps:
+      - name: Check out repository
+        # Pinned from actions/checkout@v6. Rotate intentionally for release-path reproducibility.
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Install Rust stable
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Use Rust stable
+        run: rustup default stable
+
+      - name: Set up Node.js
+        # Pinned from actions/setup-node@v6. Rotate intentionally for release-path reproducibility.
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+
+      - name: Use npm with trusted publishing support
+        run: npm install -g npm@11.10.0
+
+      - name: Use dry-run package version
+        if: ${{ inputs.dry_run }}
+        shell: bash
+        run: |
+          CURRENT_VERSION="$(node -p "require('./package.json').version")"
+          DRY_RUN_VERSION="${CURRENT_VERSION}-dry-run.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
+          node tools/sync-npm-platform-version.mjs "$DRY_RUN_VERSION"
+
+      - name: Build native binary
+        run: cargo build --release
+
+      - name: Prepare platform package
+        run: node tools/prepare-platform-package.mjs --package "${{ matrix.package }}" --binary "target/release/${{ matrix.binary }}"
+
+      - name: Preview platform package contents
+        run: npm pack "./npm/${{ matrix.package }}" --dry-run
+
+      - name: Dry-run platform publish
+        if: ${{ inputs.dry_run }}
+        run: npm publish "./npm/${{ matrix.package }}" --dry-run --tag dry-run
+
+      - name: Publish platform package
+        if: ${{ !inputs.dry_run }}
+        run: npm publish "./npm/${{ matrix.package }}"
+
+  publish-main-package:
+    name: Publish chidori-fetch
+    needs: publish-platform-packages
+    runs-on: ubuntu-latest
+    environment: npm-publish
+
+    steps:
+      - name: Check out repository
+        # Pinned from actions/checkout@v6. Rotate intentionally for release-path reproducibility.
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Set up Node.js
+        # Pinned from actions/setup-node@v6. Rotate intentionally for release-path reproducibility.
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+
+      - name: Use npm with trusted publishing support
+        run: npm install -g npm@11.10.0
+
+      - name: Use dry-run package version
         if: ${{ inputs.dry_run }}
         run: |
           CURRENT_VERSION="$(node -p "require('./package.json').version")"
           DRY_RUN_VERSION="${CURRENT_VERSION}-dry-run.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
           npm version "$DRY_RUN_VERSION" --no-git-tag-version
-          npm publish --dry-run --tag dry-run
+          node tools/sync-npm-platform-version.mjs "$DRY_RUN_VERSION"
+
+      - name: Preview root package contents
+        run: npm pack --dry-run
+
+      - name: Dry-run publish
+        if: ${{ inputs.dry_run }}
+        run: npm publish --dry-run --tag dry-run
 
       - name: Publish to npm
         if: ${{ !inputs.dry_run }}

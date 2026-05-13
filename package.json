@@ -15,9 +15,6 @@
   },
   "files": [
     "bin",
-    "src",
-    "Cargo.toml",
-    "Cargo.lock",
     "README.md"
   ],
   "scripts": {
@@ -30,9 +27,15 @@
     "parity:json": "node tools/parity-harness.mjs --json",
     "precommit": "npm run format:check && npm run lint",
     "test": "cargo test",
-    "test:tools": "node --test tools/*.test.mjs",
-    "install": "cargo build --release",
-    "prepack": "npm run build"
+    "test:tools": "node --test tools/*.test.mjs"
+  },
+  "optionalDependencies": {
+    "chidori-fetch-darwin-arm64": "0.1.7",
+    "chidori-fetch-darwin-x64": "0.1.7",
+    "chidori-fetch-linux-arm64": "0.1.7",
+    "chidori-fetch-linux-x64": "0.1.7",
+    "chidori-fetch-win32-arm64": "0.1.7",
+    "chidori-fetch-win32-x64": "0.1.7"
   },
   "keywords": [
     "markdown",

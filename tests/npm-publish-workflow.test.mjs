@@ -26,6 +26,18 @@ test("npm publish workflow uses trusted publishing instead of npm tokens", () =>
   assert.doesNotMatch(workflow, /uses:\s*actions\/(?:checkout|setup-node)@v\d+/);
   assert.doesNotMatch(workflow, /npm install -g npm@latest/);
   assert.match(workflow, /npm pack --dry-run/);
+  assert.match(workflow, /chidori-fetch-darwin-arm64/);
+  assert.match(workflow, /chidori-fetch-darwin-x64/);
+  assert.match(workflow, /chidori-fetch-linux-arm64/);
+  assert.match(workflow, /chidori-fetch-linux-x64/);
+  assert.match(workflow, /chidori-fetch-win32-arm64/);
+  assert.match(workflow, /chidori-fetch-win32-x64/);
+  assert.match(workflow, /node tools\/sync-npm-platform-version\.mjs "\$DRY_RUN_VERSION"/);
+  assert.match(
+    workflow,
+    /node tools\/prepare-platform-package\.mjs --package "\$\{\{ matrix\.package \}\}" --binary "target\/release\/\$\{\{ matrix\.binary \}\}"/,
+  );
+  assert.match(workflow, /npm publish "\.\/npm\/\$\{\{ matrix\.package \}\}" --dry-run --tag dry-run/);
   assert.match(workflow, /npm version "\$DRY_RUN_VERSION" --no-git-tag-version/);
   assert.match(workflow, /npm publish --dry-run --tag dry-run/);
   assert.match(workflow, /npm publish$/m);

@@ -3,3 +3,4 @@ docs/
 target/
 .worktrees/
 reports/
+npm/*/bin/

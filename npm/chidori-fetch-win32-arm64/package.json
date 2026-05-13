@@ -1,0 +1,26 @@
+{
+  "name": "chidori-fetch-win32-arm64",
+  "version": "0.1.7",
+  "description": "Prebuilt chidori-fetch binary for Windows arm64",
+  "homepage": "https://github.com/taishikato/chidori#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taishikato/chidori.git"
+  },
+  "bugs": {
+    "url": "https://github.com/taishikato/chidori/issues"
+  },
+  "bin": {
+    "chidori": "bin/chidori.exe"
+  },
+  "files": [
+    "bin"
+  ],
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "license": "MIT"
+}
