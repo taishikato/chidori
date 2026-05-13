@@ -2007,6 +2007,7 @@ fn cleanup_keeps_short_body_text_that_mentions_share_or_month_names() {
     <article>
       <h1>False Positive Guard</h1>
       <p>May I share?</p>
+      <p>May we improve safety by using Rust?</p>
       <p>2026 mattered.</p>
       <p>By 2024 teams were relying on post-quantum migration plans.</p>
       <section class="field-notes">
@@ -2019,6 +2020,11 @@ fn cleanup_keeps_short_body_text_that_mentions_share_or_month_names() {
     let result = clean_html_with_report(html, &CleanOptions { no_images: false });
 
     assert!(result.html.contains("May I share?"), "{}", result.html);
+    assert!(
+        result.html.contains("May we improve safety by using Rust?"),
+        "{}",
+        result.html
+    );
     assert!(result.html.contains("2026 mattered."), "{}", result.html);
     assert!(
         result

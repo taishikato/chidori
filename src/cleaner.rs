@@ -660,7 +660,7 @@ fn has_byline_cue(text: &str) -> bool {
     }
 
     let Some(rest) = text.strip_prefix("by ") else {
-        return text.contains(" by ");
+        return false;
     };
     let author_words = rest
         .split(['·', '|', '-'])

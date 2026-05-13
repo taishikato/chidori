@@ -144,18 +144,8 @@ impl TryFrom<Cli> for RunConfig {
         let input_source = if let Some(url) = cli.url {
             InputSource::Url(parse_http_url(&url)?)
         } else if let Some(path) = cli.file {
-            if source_url.is_none() {
-                return Err(ChidoriError::InvalidUrl(
-                    "--source-url is required with --file".to_string(),
-                ));
-            }
             InputSource::File(path)
         } else {
-            if source_url.is_none() {
-                return Err(ChidoriError::InvalidUrl(
-                    "--source-url is required with --stdin".to_string(),
-                ));
-            }
             InputSource::Stdin
         };
 
@@ -200,28 +190,41 @@ async fn load_input(
                     error
                 ))
             })?;
-            Ok(FetchedPage {
-                final_url: config
-                    .source_url
-                    .clone()
-                    .expect("local inputs require source_url"),
-                body,
-            })
+            let final_url = match config.source_url.clone() {
+                Some(source_url) => source_url,
+                None => file_document_url(path)?,
+            };
+            Ok(FetchedPage { final_url, body })
         }
         InputSource::Stdin => {
             let mut body = String::new();
             io::stdin().read_to_string(&mut body).map_err(|error| {
                 ChidoriError::FetchFailed(format!("failed to read stdin: {error}"))
             })?;
-            Ok(FetchedPage {
-                final_url: config
-                    .source_url
-                    .clone()
-                    .expect("local inputs require source_url"),
-                body,
-            })
+            let final_url = config.source_url.clone().unwrap_or_else(stdin_document_url);
+            Ok(FetchedPage { final_url, body })
         }
     }
+}
+
+fn file_document_url(path: &Path) -> Result<Url, ChidoriError> {
+    let absolute = fs::canonicalize(path).map_err(|error| {
+        ChidoriError::FetchFailed(format!(
+            "failed to resolve input file {}: {}",
+            path.display(),
+            error
+        ))
+    })?;
+    Url::from_file_path(&absolute).map_err(|_| {
+        ChidoriError::InvalidUrl(format!(
+            "failed to convert input file {} to a file URL",
+            absolute.display()
+        ))
+    })
+}
+
+fn stdin_document_url() -> Url {
+    Url::parse("https://stdin.chidori.local/").expect("static stdin URL is valid")
 }
 
 fn document_url(config: &RunConfig, final_url: &Url) -> Url {

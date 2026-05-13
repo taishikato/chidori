@@ -168,6 +168,37 @@ async fn file_input_extracts_saved_html_with_source_url() {
 }
 
 #[tokio::test]
+async fn file_input_works_without_source_url() {
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("saved.html");
+    std::fs::write(
+        &input_path,
+        r#"
+        <html><head><title>Saved Page</title></head><body>
+          <nav>Saved navigation should not win.</nav>
+          <article>
+            <h1>Saved Investigation</h1>
+            <p>Local HTML should be inspectable without hidden flags.</p>
+          </article>
+        </body></html>
+        "#,
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg("--file")
+        .arg(&input_path)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Saved Investigation"))
+        .stdout(predicate::str::contains(
+            "Local HTML should be inspectable without hidden flags.",
+        ))
+        .stdout(predicate::str::contains("Saved navigation").not())
+        .stderr(predicate::str::is_empty());
+}
+
+#[tokio::test]
 async fn stdin_input_extracts_html_with_selector_override() {
     let mut cmd = Command::cargo_bin("chidori").unwrap();
     cmd.arg("--stdin")
@@ -193,6 +224,29 @@ async fn stdin_input_extracts_html_with_selector_override() {
         ))
         .stdout(predicate::str::contains("Wrong Section").not())
         .stdout(predicate::str::contains("Noise should be ignored").not())
+        .stderr(predicate::str::is_empty());
+}
+
+#[tokio::test]
+async fn stdin_input_works_without_source_url() {
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg("--stdin")
+        .write_stdin(
+            r#"
+            <html><head><title>Saved Page</title></head><body>
+              <article>
+                <h1>Saved Stdin</h1>
+                <p>Standard input should be inspectable without hidden flags.</p>
+              </article>
+            </body></html>
+            "#,
+        )
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Saved Stdin"))
+        .stdout(predicate::str::contains(
+            "Standard input should be inspectable without hidden flags.",
+        ))
         .stderr(predicate::str::is_empty());
 }
 
