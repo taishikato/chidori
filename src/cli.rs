@@ -1,8 +1,10 @@
 use crate::error::ChidoriError;
-use crate::fetcher::{fetch_url, FetchConfig, BOT_USER_AGENT, DEFAULT_USER_AGENT};
+use crate::fetcher::{fetch_url, FetchConfig, FetchedPage, BOT_USER_AGENT, DEFAULT_USER_AGENT};
 use clap::{Parser, ValueEnum};
+use scraper::Selector;
 use std::fmt;
-use std::io::Read;
+use std::fs;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{ChildStderr, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::mpsc::{self, TryRecvError};
@@ -21,7 +23,13 @@ const RENDERER_STDERR_LIMIT: usize = 64 * 1024;
 #[command(about = "Fast Rust-built web-to-Markdown fetcher for coding agents")]
 pub struct Cli {
     #[arg(help = "HTTP or HTTPS URL to fetch")]
-    pub url: String,
+    pub url: Option<String>,
+
+    #[arg(long, value_name = "PATH", help = "Read saved HTML from a local file")]
+    pub file: Option<PathBuf>,
+
+    #[arg(long, help = "Read HTML from standard input")]
+    pub stdin: bool,
 
     #[arg(long, help = "Output metadata and Markdown as JSON")]
     pub json: bool,
@@ -51,6 +59,12 @@ pub struct Cli {
     #[arg(long, help = "Emit extraction diagnostics and timing information")]
     pub debug: bool,
 
+    #[arg(long, help = "Override the CSS selector used as the content root")]
+    pub selector: Option<String>,
+
+    #[arg(long, help = "Include named pipeline timings in debug JSON")]
+    pub profile: bool,
+
     #[arg(long, value_enum, default_value_t = RenderFallback::Off, help = "Use optional external rendering fallback")]
     pub render: RenderFallback,
 
@@ -60,7 +74,7 @@ pub struct Cli {
 
 #[derive(Debug, Clone)]
 pub struct RunConfig {
-    pub url: Url,
+    pub input_source: InputSource,
     pub json: bool,
     pub output: Option<PathBuf>,
     pub max_chars: Option<usize>,
@@ -69,8 +83,30 @@ pub struct RunConfig {
     pub lang: Option<String>,
     pub no_images: bool,
     pub debug: bool,
+    pub selector: Option<String>,
+    pub profile: bool,
     pub render: RenderFallback,
     pub source_url: Option<Url>,
+}
+
+#[derive(Debug, Clone)]
+pub enum InputSource {
+    Url(Url),
+    File(PathBuf),
+    Stdin,
+}
+
+impl InputSource {
+    fn is_url(&self) -> bool {
+        matches!(self, Self::Url(_))
+    }
+
+    fn url(&self) -> Option<&Url> {
+        match self {
+            Self::Url(url) => Some(url),
+            Self::File(_) | Self::Stdin => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -83,20 +119,41 @@ impl TryFrom<Cli> for RunConfig {
     type Error = ChidoriError;
 
     fn try_from(cli: Cli) -> Result<Self, Self::Error> {
-        let url = Url::parse(&cli.url).map_err(|_| ChidoriError::InvalidUrl(cli.url.clone()))?;
-        match url.scheme() {
-            "http" | "https" => {}
-            _ => return Err(ChidoriError::InvalidUrl(cli.url)),
-        }
         let source_url = cli
             .source_url
             .as_deref()
-            .map(Url::parse)
+            .map(parse_http_url)
             .transpose()
             .map_err(|_| ChidoriError::InvalidUrl(cli.source_url.clone().unwrap_or_default()))?;
+        let input_count = usize::from(cli.url.is_some())
+            + usize::from(cli.file.is_some())
+            + usize::from(cli.stdin);
+        if input_count != 1 {
+            return Err(ChidoriError::InvalidUrl(
+                "choose exactly one input: URL, --file, or --stdin".to_string(),
+            ));
+        }
+
+        let input_source = if let Some(url) = cli.url {
+            InputSource::Url(parse_http_url(&url)?)
+        } else if let Some(path) = cli.file {
+            if source_url.is_none() {
+                return Err(ChidoriError::InvalidUrl(
+                    "--source-url is required with --file".to_string(),
+                ));
+            }
+            InputSource::File(path)
+        } else {
+            if source_url.is_none() {
+                return Err(ChidoriError::InvalidUrl(
+                    "--source-url is required with --stdin".to_string(),
+                ));
+            }
+            InputSource::Stdin
+        };
 
         Ok(Self {
-            url,
+            input_source,
             json: cli.json,
             output: cli.output,
             max_chars: cli.max_chars,
@@ -105,10 +162,71 @@ impl TryFrom<Cli> for RunConfig {
             lang: cli.lang,
             no_images: cli.no_images,
             debug: cli.debug,
+            selector: cli.selector,
+            profile: cli.profile,
             render: cli.render,
             source_url,
         })
     }
+}
+
+fn parse_http_url(value: &str) -> Result<Url, ChidoriError> {
+    let url = Url::parse(value).map_err(|_| ChidoriError::InvalidUrl(value.to_string()))?;
+    match url.scheme() {
+        "http" | "https" => Ok(url),
+        _ => Err(ChidoriError::InvalidUrl(value.to_string())),
+    }
+}
+
+async fn load_input(
+    config: &RunConfig,
+    fetch_config: &FetchConfig,
+) -> Result<FetchedPage, ChidoriError> {
+    match &config.input_source {
+        InputSource::Url(url) => fetch_url(url, fetch_config).await,
+        InputSource::File(path) => {
+            let body = fs::read_to_string(path).map_err(|error| {
+                ChidoriError::FetchFailed(format!(
+                    "failed to read input file {}: {}",
+                    path.display(),
+                    error
+                ))
+            })?;
+            Ok(FetchedPage {
+                final_url: config
+                    .source_url
+                    .clone()
+                    .expect("local inputs require source_url"),
+                body,
+            })
+        }
+        InputSource::Stdin => {
+            let mut body = String::new();
+            io::stdin().read_to_string(&mut body).map_err(|error| {
+                ChidoriError::FetchFailed(format!("failed to read stdin: {error}"))
+            })?;
+            Ok(FetchedPage {
+                final_url: config
+                    .source_url
+                    .clone()
+                    .expect("local inputs require source_url"),
+                body,
+            })
+        }
+    }
+}
+
+fn document_url(config: &RunConfig, final_url: &Url) -> Url {
+    config
+        .source_url
+        .clone()
+        .unwrap_or_else(|| final_url.clone())
+}
+
+fn parse_document_with_profile(html: String, url: Url) -> (crate::document::ParsedDocument, u128) {
+    let parse_started = Instant::now();
+    let doc = crate::document::ParsedDocument::parse(html, url);
+    (doc, parse_started.elapsed().as_millis())
 }
 
 pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
@@ -123,7 +241,7 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
             .unwrap_or_else(|| DEFAULT_USER_AGENT.to_string()),
         lang: config.lang.clone(),
     };
-    let mut page = match fetch_url(&config.url, &fetch_config).await {
+    let mut page = match load_input(&config, &fetch_config).await {
         Ok(page) => page,
         Err(error) => {
             if config.debug {
@@ -140,14 +258,14 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
         );
     }
 
-    let document_url = config
-        .source_url
-        .clone()
-        .unwrap_or_else(|| page.final_url.clone());
-    let mut doc = crate::document::ParsedDocument::parse(page.body, document_url);
+    let (mut doc, parse_ms) =
+        parse_document_with_profile(page.body, document_url(&config, &page.final_url));
     let mut fallback_steps = Vec::new();
     let extraction = match extract_markdown_from_doc(&doc, &config) {
-        Ok(extraction) => extraction,
+        Ok(mut extraction) => {
+            extraction.profile.parse_ms = parse_ms;
+            extraction
+        }
         Err(ChidoriError::ExtractionFailed) => {
             if config.debug {
                 eprintln!(
@@ -156,24 +274,31 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
                 );
             }
 
+            if !config.input_source.is_url() {
+                return Err(ChidoriError::ExtractionFailed);
+            }
+
             if config.render == RenderFallback::Auto {
                 if config.debug {
                     eprintln!("debug: retrying with external renderer");
                 }
+                let input_url = config
+                    .input_source
+                    .url()
+                    .expect("render retry is only available for URL inputs");
                 match render_with_external_command(
-                    &config.url,
+                    input_url,
                     fetch_config.timeout,
                     fetch_config.max_bytes,
                 )
                 .and_then(|rendered_html| {
-                    let rendered_url = config
-                        .source_url
-                        .clone()
-                        .unwrap_or_else(|| page.final_url.clone());
-                    let rendered_doc =
-                        crate::document::ParsedDocument::parse(rendered_html, rendered_url);
-                    extract_markdown_from_doc(&rendered_doc, &config)
-                        .map(|extraction| (rendered_doc, extraction))
+                    let rendered_url = document_url(&config, &page.final_url);
+                    let (rendered_doc, parse_ms) =
+                        parse_document_with_profile(rendered_html, rendered_url);
+                    extract_markdown_from_doc(&rendered_doc, &config).map(|mut extraction| {
+                        extraction.profile.parse_ms = parse_ms;
+                        (rendered_doc, extraction)
+                    })
                 }) {
                     Ok((rendered_doc, extraction)) => {
                         fallback_steps.push("external-renderer".to_string());
@@ -215,7 +340,8 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
     metadata.url = config
         .source_url
         .as_ref()
-        .unwrap_or(&config.url)
+        .or_else(|| config.input_source.url())
+        .unwrap_or(&page.final_url)
         .to_string();
     metadata.final_url = page.final_url.to_string();
 
@@ -255,6 +381,7 @@ pub async fn run(cli: Cli) -> Result<(), ChidoriError> {
         timings: crate::output::DebugTimings {
             total_ms: started.elapsed().as_millis(),
         },
+        profile: config.profile.then_some(extraction.profile.clone()),
     });
     let rendered =
         crate::output::render_output_with_debug(&metadata, &markdown, mode, debug.as_ref())?;
@@ -275,16 +402,18 @@ async fn retry_with_bot_user_agent(
         user_agent: BOT_USER_AGENT.to_string(),
         ..fetch_config.clone()
     };
-    match fetch_url(&config.url, &bot_fetch_config).await {
+    let input_url = config
+        .input_source
+        .url()
+        .expect("bot retry is only available for URL inputs");
+    match fetch_url(input_url, &bot_fetch_config).await {
         Ok(bot_page) => {
             let bot_final_url = bot_page.final_url.clone();
-            let bot_document_url = config
-                .source_url
-                .clone()
-                .unwrap_or_else(|| bot_final_url.clone());
-            let bot_doc = crate::document::ParsedDocument::parse(bot_page.body, bot_document_url);
+            let (bot_doc, parse_ms) =
+                parse_document_with_profile(bot_page.body, document_url(config, &bot_final_url));
             match extract_markdown_from_doc(&bot_doc, config) {
-                Ok(extraction) => {
+                Ok(mut extraction) => {
+                    extraction.profile.parse_ms = parse_ms;
                     *final_url = bot_final_url;
                     *doc = bot_doc;
                     Ok(extraction)
@@ -622,6 +751,7 @@ struct ExtractionResult {
     fallbacks: Vec<String>,
     content_title: Option<String>,
     diagnostics: crate::extractor::ExtractionDiagnostics,
+    profile: crate::output::DebugProfile,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -643,6 +773,11 @@ fn extract_markdown_from_doc(
     doc: &crate::document::ParsedDocument,
     config: &RunConfig,
 ) -> Result<ExtractionResult, ChidoriError> {
+    let mut profile = crate::output::DebugProfile::default();
+    let raw_extract_started = Instant::now();
+    let raw_markdown = crate::markdown::extract_raw_markdown(&doc.html);
+    profile.extract_ms = raw_extract_started.elapsed().as_millis();
+
     let (
         markdown,
         path,
@@ -653,7 +788,7 @@ fn extract_markdown_from_doc(
         fallbacks,
         content_title,
         diagnostics,
-    ) = if let Some(raw_markdown) = crate::markdown::extract_raw_markdown(&doc.html) {
+    ) = if let Some(raw_markdown) = raw_markdown {
         let raw_markdown = if config.no_images {
             crate::markdown::remove_markdown_images(&raw_markdown)
         } else {
@@ -677,16 +812,23 @@ fn extract_markdown_from_doc(
             crate::extractor::ExtractionDiagnostics::default(),
         )
     } else {
-        let content = crate::extractor::extract_main_content(doc)?;
+        let extract_started = Instant::now();
+        let content = extract_html_content(doc, config.selector.as_deref())?;
+        profile.extract_ms = extract_started.elapsed().as_millis();
+
+        let standardize_started = Instant::now();
         let standardized = crate::standardize::standardize_html(
             &content.html,
             &crate::standardize::StandardizeOptions {
                 base_url: Some(doc.url.clone()),
             },
         )?;
+        profile.standardize_ms = standardize_started.elapsed().as_millis();
+
         let clean_options = crate::cleaner::CleanOptions {
             no_images: config.no_images,
         };
+        let clean_started = Instant::now();
         let cleaned = if content
             .fallbacks
             .iter()
@@ -699,12 +841,17 @@ fn extract_markdown_from_doc(
         } else {
             crate::cleaner::clean_html_with_report(&standardized.html, &clean_options)
         };
+        profile.clean_ms = clean_started.elapsed().as_millis();
+
+        let markdown_started = Instant::now();
         let markdown = crate::markdown::html_to_markdown(
             &cleaned.html,
             &crate::markdown::MarkdownOptions {
                 max_chars: config.max_chars,
             },
         );
+        profile.markdown_ms = markdown_started.elapsed().as_millis();
+
         let content_title = crate::metadata::title_from_html_fragment(&cleaned.html);
         if content.score.is_some()
             && is_too_link_dense(&cleaned.html)
@@ -738,8 +885,34 @@ fn extract_markdown_from_doc(
             fallbacks,
             content_title,
             diagnostics,
+            profile,
         })
     }
+}
+
+fn extract_html_content(
+    doc: &crate::document::ParsedDocument,
+    selector: Option<&str>,
+) -> Result<crate::extractor::ExtractedContent, ChidoriError> {
+    let Some(selector) = selector else {
+        return crate::extractor::extract_main_content(doc);
+    };
+    let parsed_selector = Selector::parse(selector).map_err(|error| {
+        ChidoriError::Unknown(format!("invalid selector `{selector}`: {error:?}"))
+    })?;
+    let element = doc
+        .dom
+        .select(&parsed_selector)
+        .next()
+        .ok_or(ChidoriError::ExtractionFailed)?;
+
+    Ok(crate::extractor::ExtractedContent {
+        html: element.html(),
+        selector: Some(selector.to_string()),
+        score: None,
+        fallbacks: Vec::new(),
+        diagnostics: crate::extractor::ExtractionDiagnostics::default(),
+    })
 }
 
 fn first_markdown_heading(markdown: &str) -> Option<String> {

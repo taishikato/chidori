@@ -29,12 +29,24 @@ pub struct DebugDiagnostics {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub fallback_attempts: Vec<crate::extractor::FallbackAttemptDiagnostic>,
     pub timings: DebugTimings,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<DebugProfile>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DebugTimings {
     pub total_ms: u128,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugProfile {
+    pub parse_ms: u128,
+    pub extract_ms: u128,
+    pub standardize_ms: u128,
+    pub clean_ms: u128,
+    pub markdown_ms: u128,
 }
 
 #[derive(Debug, Serialize)]

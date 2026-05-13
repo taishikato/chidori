@@ -135,6 +135,103 @@ async fn json_outputs_metadata_and_markdown() {
 }
 
 #[tokio::test]
+async fn file_input_extracts_saved_html_with_source_url() {
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("saved.html");
+    std::fs::write(
+        &input_path,
+        r#"
+        <html><head><title>Saved Page</title></head><body>
+          <nav>Saved navigation should not win.</nav>
+          <article>
+            <h1>Saved Investigation</h1>
+            <p>Local HTML should flow through the same extraction pipeline.</p>
+          </article>
+        </body></html>
+        "#,
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg("--file")
+        .arg(&input_path)
+        .arg("--source-url")
+        .arg("https://example.com/saved")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Saved Investigation"))
+        .stdout(predicate::str::contains(
+            "Local HTML should flow through the same extraction pipeline.",
+        ))
+        .stdout(predicate::str::contains("Saved navigation").not())
+        .stderr(predicate::str::is_empty());
+}
+
+#[tokio::test]
+async fn stdin_input_extracts_html_with_selector_override() {
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg("--stdin")
+        .arg("--source-url")
+        .arg("https://example.com/stdin")
+        .arg("--selector")
+        .arg(".target")
+        .write_stdin(
+            r#"
+            <html><body>
+              <main>
+                <section class="noise"><h1>Wrong Section</h1><p>Noise should be ignored.</p></section>
+                <section class="target"><h1>Selected Section</h1><p>Only this selected node should be extracted.</p></section>
+              </main>
+            </body></html>
+            "#,
+        )
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Selected Section"))
+        .stdout(predicate::str::contains(
+            "Only this selected node should be extracted.",
+        ))
+        .stdout(predicate::str::contains("Wrong Section").not())
+        .stdout(predicate::str::contains("Noise should be ignored").not())
+        .stderr(predicate::str::is_empty());
+}
+
+#[tokio::test]
+async fn profile_debug_includes_named_pipeline_timings() {
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("profile.html");
+    std::fs::write(
+        &input_path,
+        r#"
+        <html><head><title>Profile Page</title></head><body>
+          <article><h1>Profile Page</h1><p>Timing diagnostics should include each named pipeline stage.</p></article>
+        </body></html>
+        "#,
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg("--file")
+        .arg(&input_path)
+        .arg("--source-url")
+        .arg("https://example.com/profile")
+        .arg("--json")
+        .arg("--debug")
+        .arg("--profile")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(json["debug"]["profile"]["parseMs"].is_number());
+    assert!(json["debug"]["profile"]["extractMs"].is_number());
+    assert!(json["debug"]["profile"]["standardizeMs"].is_number());
+    assert!(json["debug"]["profile"]["cleanMs"].is_number());
+    assert!(json["debug"]["profile"]["markdownMs"].is_number());
+}
+
+#[tokio::test]
 async fn json_title_falls_back_to_extracted_article_heading() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
