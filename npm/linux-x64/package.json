@@ -1,6 +1,6 @@
 {
   "name": "@chidori-fetch/linux-x64",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Prebuilt chidori-fetch binary for Linux x64",
   "homepage": "https://github.com/taishikato/chidori#readme",
   "repository": {
