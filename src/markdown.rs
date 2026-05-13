@@ -580,13 +580,14 @@ fn figure_markdown(fragment: &str) -> Option<String> {
     let dom = Html::parse_fragment(fragment);
     let img_selector = Selector::parse("img").unwrap();
     let caption_selector = Selector::parse("figcaption").unwrap();
-    let images = dom
-        .select(&img_selector)
-        .map(image_markdown)
-        .collect::<Option<Vec<_>>>()?;
-    if images.is_empty() {
+    let image_nodes = dom.select(&img_selector).collect::<Vec<_>>();
+    if image_nodes.is_empty() {
         return None;
     }
+    let images = image_nodes
+        .into_iter()
+        .filter_map(image_markdown)
+        .collect::<Vec<_>>();
     let caption = dom
         .select(&caption_selector)
         .next()
@@ -594,7 +595,9 @@ fn figure_markdown(fragment: &str) -> Option<String> {
         .unwrap_or_default();
 
     let mut parts = images;
-    if caption.is_empty() {
+    if parts.is_empty() && caption.is_empty() {
+        Some(String::new())
+    } else if caption.is_empty() {
         Some(parts.join("\n\n"))
     } else {
         parts.push(caption);
@@ -1071,6 +1074,10 @@ fn attr_value(opening_tag: &str, name: &str) -> Option<String> {
 }
 
 fn largest_srcset_candidate(srcset: &str) -> Option<&str> {
+    if contains_unsafe_srcset_candidate(srcset) {
+        return None;
+    }
+
     srcset
         .split(',')
         .filter_map(|candidate| {
@@ -1090,9 +1097,58 @@ fn is_dangerous_url(value: &str) -> bool {
     let normalized = value
         .chars()
         .filter(|ch| !ch.is_ascii_whitespace() && !ch.is_control())
-        .collect::<String>()
-        .to_ascii_lowercase();
-    normalized.starts_with("javascript:") || normalized.starts_with("data:text/html")
+        .collect::<String>();
+    let normalized = normalized.trim();
+    if normalized.is_empty() || normalized.starts_with('#') {
+        return true;
+    }
+
+    url_scheme(normalized).is_some_and(|scheme| !matches!(scheme.as_str(), "http" | "https"))
+}
+
+fn contains_unsafe_srcset_candidate(srcset: &str) -> bool {
+    let trimmed = srcset.trim();
+    starts_with_unsafe_scheme(trimmed)
+        || trimmed
+            .split(',')
+            .map(str::trim)
+            .any(starts_with_unsafe_scheme)
+}
+
+fn starts_with_unsafe_scheme(value: &str) -> bool {
+    matches!(
+        url_scheme(value).as_deref(),
+        Some("mailto" | "tel" | "javascript" | "data" | "blob" | "cid" | "file")
+    )
+}
+
+fn url_scheme(value: &str) -> Option<String> {
+    let value = value.trim_start();
+    let colon = value.find(':')?;
+    let first_separator = value.find(['/', '?', '#']).unwrap_or(value.len());
+    if colon > first_separator {
+        return None;
+    }
+
+    let scheme = &value[..colon];
+    if scheme.is_empty()
+        || !scheme
+            .chars()
+            .enumerate()
+            .all(|(index, ch)| is_url_scheme_char(ch, index == 0))
+    {
+        return None;
+    }
+
+    Some(scheme.to_ascii_lowercase())
+}
+
+fn is_url_scheme_char(ch: char, first: bool) -> bool {
+    if first {
+        return ch.is_ascii_alphabetic();
+    }
+
+    ch.is_ascii_alphanumeric() || matches!(ch, '+' | '-' | '.')
 }
 
 fn srcset_descriptor_score(descriptor: &str) -> Option<usize> {

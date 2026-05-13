@@ -5,6 +5,7 @@ use chidori::{
     markdown::{extract_raw_markdown, html_to_markdown, remove_markdown_images, MarkdownOptions},
     metadata::{extract_metadata, extract_metadata_with_content_title, Metadata},
     output::{render_output, RenderMode},
+    standardize::{standardize_html, StandardizeOptions},
 };
 use url::Url;
 
@@ -120,6 +121,36 @@ fn markdown_escapes_special_characters_in_figure_images() {
 }
 
 #[test]
+fn markdown_does_not_choose_broken_url_from_data_srcset() {
+    let html = r#"
+    <article>
+      <figure>
+        <img alt="Inline" src="/images/fallback.png" srcset="data:image/png;base64,AAAA 1x">
+      </figure>
+      <figure>
+        <img alt="Unsafe only" srcset="DATA:image/png;base64,BBBB 1x">
+      </figure>
+      <figure>
+        <img alt="Script fallback" src="/images/safe-script.png" srcset="JaVaScRiPt:alert(1) 2x">
+      </figure>
+    </article>"#;
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(
+        markdown.contains("![Inline](/images/fallback.png)"),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("![Script fallback](/images/safe-script.png)"),
+        "{markdown}"
+    );
+    assert!(!markdown.contains("AAAA"), "{markdown}");
+    assert!(!markdown.contains("BBBB"), "{markdown}");
+    assert!(!markdown.contains("JaVaScRiPt"), "{markdown}");
+    assert!(!markdown.contains("![Unsafe only]"), "{markdown}");
+}
+
+#[test]
 fn markdown_keeps_caption_when_unwrapping_single_cell_layout_table() {
     let html = r#"
     <article>
@@ -209,6 +240,249 @@ fn preserves_inline_code_inside_simple_html_table_cells() {
         markdown.contains("| Alpha | `chidori --json` |"),
         "{markdown}"
     );
+}
+
+#[test]
+fn standardize_promotes_lazy_image_sources() {
+    let html = r#"
+    <article>
+      <img alt="Launch diagram" src="/placeholder.svg" data-src="images/launch.png">
+      <picture>
+        <source data-srcset="images/launch-large.png 2x">
+      </picture>
+    </article>"#;
+    let standardized = standardize_html(
+        html,
+        &StandardizeOptions {
+            base_url: Some(Url::parse("https://example.com/docs/post").unwrap()),
+        },
+    )
+    .unwrap();
+
+    assert!(
+        standardized
+            .html
+            .contains(r#"src="https://example.com/docs/images/launch.png""#),
+        "{}",
+        standardized.html
+    );
+    assert!(
+        standardized
+            .html
+            .contains(r#"srcset="https://example.com/docs/images/launch-large.png 2x""#),
+        "{}",
+        standardized.html
+    );
+    assert!(standardized.records.iter().any(|record| {
+        record.reason == "lazy-image-source" && record.selector == "img[data-src]"
+    }));
+}
+
+#[test]
+fn standardize_recovers_noscript_image_fallback() {
+    let html = r#"
+    <article>
+      <noscript><img alt="Fallback image" src="fallback.jpg"></noscript>
+    </article>"#;
+    let standardized = standardize_html(
+        html,
+        &StandardizeOptions {
+            base_url: Some(Url::parse("https://example.com/articles/story").unwrap()),
+        },
+    )
+    .unwrap();
+
+    assert!(
+        standardized
+            .html
+            .contains(r#"src="https://example.com/articles/fallback.jpg""#),
+        "{}",
+        standardized.html
+    );
+    assert!(standardized.html.contains(r#"alt="Fallback image""#));
+    assert!(standardized.records.iter().any(|record| {
+        record.reason == "noscript-image-fallback" && record.selector == "noscript img"
+    }));
+}
+
+#[test]
+fn standardize_resolves_root_relative_media_urls() {
+    let html = r#"
+    <article>
+      <img alt="Root image" src="/images/root.png">
+      <picture>
+        <source srcset="/images/root-large.png 2x, /images/root-small.png 1x">
+      </picture>
+      <video poster="/images/poster.jpg"></video>
+    </article>"#;
+    let standardized = standardize_html(
+        html,
+        &StandardizeOptions {
+            base_url: Some(Url::parse("https://example.com/docs/post").unwrap()),
+        },
+    )
+    .unwrap();
+
+    assert!(
+        standardized
+            .html
+            .contains(r#"src="https://example.com/images/root.png""#),
+        "{}",
+        standardized.html
+    );
+    assert!(
+        standardized.html.contains(
+            r#"srcset="https://example.com/images/root-large.png 2x, https://example.com/images/root-small.png 1x""#
+        ),
+        "{}",
+        standardized.html
+    );
+    assert!(
+        standardized
+            .html
+            .contains(r#"poster="https://example.com/images/poster.jpg""#),
+        "{}",
+        standardized.html
+    );
+}
+
+#[test]
+fn standardize_leaves_data_srcset_unchanged() {
+    let html = r#"
+    <article>
+      <img alt="Inline" srcset="data:image/png;base64,AAAA 1x, /images/fallback.png 2x">
+    </article>"#;
+    let standardized = standardize_html(
+        html,
+        &StandardizeOptions {
+            base_url: Some(Url::parse("https://example.com/docs/post").unwrap()),
+        },
+    )
+    .unwrap();
+
+    assert!(
+        standardized
+            .html
+            .contains(r#"srcset="data:image/png;base64,AAAA 1x, /images/fallback.png 2x""#),
+        "{}",
+        standardized.html
+    );
+}
+
+#[test]
+fn standardize_does_not_promote_broken_picture_data_srcset() {
+    let html = r#"
+    <article>
+      <picture>
+        <source srcset="data:image/png;base64,AAAA 2x">
+        <img alt="Inline">
+      </picture>
+    </article>"#;
+    let standardized = standardize_html(
+        html,
+        &StandardizeOptions {
+            base_url: Some(Url::parse("https://example.com/docs/post").unwrap()),
+        },
+    )
+    .unwrap();
+    let markdown = html_to_markdown(&standardized.html, &MarkdownOptions { max_chars: None });
+
+    assert!(
+        !standardized.html.contains(r#"src="AAAA""#),
+        "{}",
+        standardized.html
+    );
+    assert!(
+        !standardized.html.contains("https://example.com/docs/AAAA"),
+        "{}",
+        standardized.html
+    );
+    assert!(!markdown.contains("AAAA"), "{markdown}");
+}
+
+#[test]
+fn standardize_skips_mixed_case_unsafe_media_urls() {
+    let html = r##"
+    <article>
+      <img alt="Fragment" src="#preview">
+      <img alt="JS" src="JaVaScRiPt:alert(1)">
+      <img alt="Data" src="DATA:image/png;base64,AAAA">
+      <video poster="FiLe:///tmp/poster.jpg"></video>
+      <source srcset="BlOb:https://example.com/image 1x">
+      <a href="MAILTO:reader@example.com">Email</a>
+    </article>"##;
+    let standardized = standardize_html(
+        html,
+        &StandardizeOptions {
+            base_url: Some(Url::parse("https://example.com/docs/post").unwrap()),
+        },
+    )
+    .unwrap();
+
+    assert!(
+        standardized.html.contains(r##"src="#preview""##),
+        "{}",
+        standardized.html
+    );
+    assert!(
+        standardized.html.contains(r#"src="JaVaScRiPt:alert(1)""#),
+        "{}",
+        standardized.html
+    );
+    assert!(
+        standardized
+            .html
+            .contains(r#"src="DATA:image/png;base64,AAAA""#),
+        "{}",
+        standardized.html
+    );
+    assert!(
+        standardized
+            .html
+            .contains(r#"poster="FiLe:///tmp/poster.jpg""#),
+        "{}",
+        standardized.html
+    );
+    assert!(
+        standardized
+            .html
+            .contains(r#"srcset="BlOb:https://example.com/image 1x""#),
+        "{}",
+        standardized.html
+    );
+    assert!(
+        standardized
+            .html
+            .contains(r#"href="MAILTO:reader@example.com""#),
+        "{}",
+        standardized.html
+    );
+}
+
+#[test]
+fn standardize_wraps_preformatted_code() {
+    let html = r#"
+    <article>
+      <code class="language-rust">fn main() {
+    println!("ready");
+}</code>
+    </article>"#;
+    let standardized = standardize_html(html, &StandardizeOptions { base_url: None }).unwrap();
+
+    assert!(
+        standardized.html.contains("<pre><code"),
+        "{}",
+        standardized.html
+    );
+    assert!(
+        standardized.html.contains("println!(\"ready\")"),
+        "{}",
+        standardized.html
+    );
+    assert!(standardized
+        .records
+        .iter()
+        .any(|record| { record.reason == "preformatted-code" && record.selector == "code" }));
 }
 
 #[test]

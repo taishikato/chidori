@@ -23,6 +23,8 @@ pub struct DebugDiagnostics {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub removals: Vec<crate::cleaner::RemovalRecord>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub standardizations: Vec<crate::standardize::StandardizeRecord>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub candidates: Vec<crate::extractor::ContentCandidateDiagnostic>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub fallback_attempts: Vec<crate::extractor::FallbackAttemptDiagnostic>,
