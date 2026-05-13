@@ -26,6 +26,25 @@ impl Candidate {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct SiteExtraction {
+    pub(crate) selector: String,
+    pub(crate) html: String,
+}
+
+impl SiteExtraction {
+    pub(crate) fn new(selector: impl Into<String>, html: String) -> Self {
+        Self {
+            selector: selector.into(),
+            html,
+        }
+    }
+}
+
+pub(crate) type SiteExtractor = fn(
+    &crate::document::ParsedDocument,
+) -> Result<Option<SiteExtraction>, crate::error::ChidoriError>;
+
+#[derive(Debug, Clone)]
 pub struct ExtractedContent {
     pub html: String,
     pub selector: Option<String>,
