@@ -267,3 +267,29 @@ fn nearest_reddit_comment<'a>(
         ElementRef::wrap(ancestor).filter(|ancestor| comment_wrapper_selector.matches(ancestor))
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use scraper::{Html, Selector};
+
+    use super::comment_depth;
+
+    #[test]
+    fn comment_depth_fallback_counts_ancestor_comments_only() {
+        let html = Html::parse_document(
+            r#"
+            <div data-testid="comment">
+                <div class="md">Top-level comment</div>
+                <div data-testid="comment">
+                    <div class="md">Reply comment</div>
+                </div>
+            </div>
+            "#,
+        );
+        let selector = Selector::parse("[data-testid=\"comment\"]").unwrap();
+        let comments: Vec<_> = html.select(&selector).collect();
+
+        assert_eq!(comment_depth(comments[0]), 0);
+        assert_eq!(comment_depth(comments[1]), 1);
+    }
+}
