@@ -7,3 +7,4 @@ pub mod fetcher;
 pub mod markdown;
 pub mod metadata;
 pub mod output;
+pub mod standardize;

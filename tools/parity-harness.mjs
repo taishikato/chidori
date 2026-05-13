@@ -17,11 +17,23 @@ const referenceCli = resolve(referenceRoot, 'dist/cli.js');
 const binaryExt = process.platform === 'win32' ? '.exe' : '';
 const chidoriCli = resolve(root, 'target', 'debug', `chidori${binaryExt}`);
 
-function parseArgs() {
-  const args = new Set(process.argv.slice(2));
+function parseArgs(argv = process.argv.slice(2)) {
+  const args = new Set(argv);
+  const valueAfter = (name) => {
+    const index = argv.indexOf(name);
+    if (index < 0) return undefined;
+    const value = argv[index + 1];
+    return value && !value.startsWith('--') ? value : undefined;
+  };
+  const cases = valueAfter('--case')
+    ?.split(',')
+    .map((value) => value.trim())
+    .filter(Boolean) ?? [];
   return {
     updateReport: !args.has('--no-report'),
     build: !args.has('--no-build'),
+    jsonOnly: args.has('--json'),
+    cases,
   };
 }
 
@@ -81,13 +93,135 @@ function jaccard(a, b) {
   return intersection / (left.size + right.size - intersection);
 }
 
-function expectationStatus(markdown, expected, rejected) {
-  const missingExpected = expected.filter((snippet) => !markdown.includes(snippet));
-  const presentRejected = rejected.filter((snippet) => markdown.includes(snippet));
+function wordCount(value) {
+  return normalizeMarkdown(value).match(/[\p{L}\p{N}]+(?:'[\p{L}\p{N}]+)?/gu)?.length ?? 0;
+}
+
+function metadataMismatches(actual, expected = {}) {
+  return Object.entries(expected)
+    .map(([field, expectedValue]) => ({
+      field,
+      expected: expectedValue,
+      actual: actual?.[field] ?? '',
+    }))
+    .filter(({ expected, actual }) => String(actual) !== String(expected));
+}
+
+function wordCountStatus(markdown, range = {}) {
+  const words = wordCount(markdown);
+  const min = range.min ?? 0;
+  const max = range.max ?? Number.POSITIVE_INFINITY;
   return {
-    ok: missingExpected.length === 0 && presentRejected.length === 0,
+    ok: words >= min && words <= max,
+    actual: words,
+    min,
+    max: Number.isFinite(max) ? max : null,
+  };
+}
+
+function noiseRatioStatus(markdown, noiseSnippets = [], maxNoiseRatio = 0) {
+  const normalized = normalizeMarkdown(markdown);
+  if (normalized.length === 0) {
+    return { ok: true, ratio: 0, matched: [] };
+  }
+  const matches = noiseSnippets
+    .map((snippet) => {
+      const normalizedSnippet = normalizeMarkdown(snippet);
+      if (normalizedSnippet.length === 0) {
+        return { snippet, occurrences: 0, chars: 0 };
+      }
+
+      let occurrences = 0;
+      let index = normalized.indexOf(normalizedSnippet);
+      while (index !== -1) {
+        occurrences += 1;
+        index = normalized.indexOf(normalizedSnippet, index + normalizedSnippet.length);
+      }
+
+      return {
+        snippet,
+        occurrences,
+        chars: occurrences * normalizedSnippet.length,
+      };
+    })
+    .filter(({ occurrences }) => occurrences > 0);
+  const matched = matches.map(({ snippet }) => snippet);
+  const noiseChars = matches.reduce((sum, { chars }) => sum + chars, 0);
+  const ratio = noiseChars / normalized.length;
+  return {
+    ok: ratio <= maxNoiseRatio,
+    ratio: Number(ratio.toFixed(3)),
+    matched,
+  };
+}
+
+function looksLikeExpectation(value) {
+  return (
+    value !== null
+    && typeof value === 'object'
+    && [
+      'contains',
+      'expected',
+      'excludes',
+      'rejected',
+      'metadata',
+      'wordCount',
+      'noise',
+      'maxNoiseRatio',
+    ].some((field) => Object.hasOwn(value, field))
+  );
+}
+
+function normalizeExpectation(expectedOrContains, rejected = []) {
+  if (Array.isArray(expectedOrContains)) {
+    return {
+      contains: expectedOrContains,
+      excludes: rejected,
+      metadata: {},
+      wordCount: {},
+      noise: [],
+      maxNoiseRatio: 0,
+    };
+  }
+
+  return {
+    contains: expectedOrContains?.contains ?? expectedOrContains?.expected ?? [],
+    excludes: expectedOrContains?.excludes ?? expectedOrContains?.rejected ?? [],
+    metadata: expectedOrContains?.metadata ?? {},
+    wordCount: expectedOrContains?.wordCount ?? {},
+    noise: expectedOrContains?.noise ?? [],
+    maxNoiseRatio: expectedOrContains?.maxNoiseRatio ?? 0,
+  };
+}
+
+function expectationStatus(markdown, metadataOrExpected, expectationOrRejected, maybeRejected) {
+  const legacyCall = Array.isArray(metadataOrExpected);
+  const expectationOnlyCall =
+    !legacyCall && looksLikeExpectation(metadataOrExpected) && expectationOrRejected === undefined;
+  const metadata = legacyCall || expectationOnlyCall ? {} : metadataOrExpected ?? {};
+  const expectation = legacyCall
+    ? normalizeExpectation(metadataOrExpected, expectationOrRejected ?? [])
+    : expectationOnlyCall
+      ? normalizeExpectation(metadataOrExpected)
+      : normalizeExpectation(expectationOrRejected ?? {}, maybeRejected ?? []);
+  const missingExpected = expectation.contains.filter((snippet) => !markdown.includes(snippet));
+  const presentRejected = expectation.excludes.filter((snippet) => markdown.includes(snippet));
+  const metadataProblems = metadataMismatches(metadata, expectation.metadata);
+  const words = wordCountStatus(markdown, expectation.wordCount);
+  const noise = noiseRatioStatus(markdown, expectation.noise, expectation.maxNoiseRatio);
+
+  return {
+    ok:
+      missingExpected.length === 0
+      && presentRejected.length === 0
+      && metadataProblems.length === 0
+      && words.ok
+      && noise.ok,
     missingExpected,
     presentRejected,
+    metadataMismatches: metadataProblems,
+    wordCount: words,
+    noiseRatio: noise,
   };
 }
 
@@ -191,10 +325,16 @@ async function runCase(testCase, baseUrl) {
     }
   }
 
-  const expected = testCase.expected ?? [];
-  const rejected = testCase.rejected ?? [];
-  const chidoriExpectation = expectationStatus(chidoriMarkdown, expected, rejected);
-  const referenceExpectation = expectationStatus(referenceMarkdown, expected, rejected);
+  const expectation = normalizeExpectation({
+    contains: testCase.contains ?? testCase.expected ?? [],
+    excludes: testCase.excludes ?? testCase.rejected ?? [],
+    metadata: testCase.metadata ?? {},
+    wordCount: testCase.wordCount ?? {},
+    noise: testCase.noise ?? [],
+    maxNoiseRatio: testCase.maxNoiseRatio ?? 0,
+  });
+  const chidoriExpectation = expectationStatus(chidoriMarkdown, chidoriMetadata, expectation);
+  const referenceExpectation = expectationStatus(referenceMarkdown, referenceMetadata, expectation);
   const similarity = jaccard(chidoriMarkdown, referenceMarkdown);
   const chidoriErrored = chidori.status !== 0 || chidoriParseError !== '';
   const referenceErrored = reference.status !== 0 || referenceParseError !== '';
@@ -279,7 +419,78 @@ function metadataGaps(report) {
     .filter(({ fields }) => fields.length > 0);
 }
 
-export function renderMarkdown(report) {
+function markdownCode(value) {
+  const text = String(value).replace(/\r\n?/g, '\n');
+  if (!text.includes('`') && !text.includes('\n') && text.length <= 120) {
+    return `\`${text}\``;
+  }
+
+  const longestFence =
+    text
+      .match(/`+/g)
+      ?.reduce((max, run) => Math.max(max, run.length), 0) ?? 0;
+  const fence = '`'.repeat(Math.max(3, longestFence + 1));
+  return `${fence}\n${text}\n${fence}`;
+}
+
+function indentedCodeBlock(value) {
+  return markdownCode(value)
+    .split('\n')
+    .map((line) => `    ${line}`)
+    .join('\n');
+}
+
+function snippetList(label, snippets) {
+  if (!snippets || snippets.length === 0) return [];
+
+  const rendered = snippets.map(markdownCode);
+  if (rendered.every((snippet) => !snippet.includes('\n'))) {
+    return [`${label}: ${rendered.join(', ')}`];
+  }
+
+  return snippets.map((snippet) => {
+    const code = markdownCode(snippet);
+    if (!code.includes('\n')) {
+      return `${label}: ${code}`;
+    }
+    return `${label}:\n${indentedCodeBlock(snippet)}`;
+  });
+}
+
+function qualityGateLines(result) {
+  const status = result.expectations?.chidori;
+  if (!status || status.ok) return [];
+
+  const lines = [];
+  lines.push(`- ${result.id}:`);
+  for (const detail of snippetList('missing', status.missingExpected)) {
+    lines.push(`  - ${detail}`);
+  }
+  for (const detail of snippetList('rejected present', status.presentRejected)) {
+    lines.push(`  - ${detail}`);
+  }
+  for (const mismatch of status.metadataMismatches ?? []) {
+    const expected = markdownCode(mismatch.expected);
+    const actual = markdownCode(mismatch.actual);
+    if (!expected.includes('\n') && !actual.includes('\n')) {
+      lines.push(`  - metadata ${mismatch.field}: expected ${expected}, got ${actual}`);
+    } else {
+      lines.push(`  - metadata ${mismatch.field}:`);
+      lines.push(`    expected:\n${indentedCodeBlock(mismatch.expected)}`);
+      lines.push(`    actual:\n${indentedCodeBlock(mismatch.actual)}`);
+    }
+  }
+  if (status.wordCount && !status.wordCount.ok) {
+    const max = status.wordCount.max ?? 'unbounded';
+    lines.push(`  - word count: ${status.wordCount.actual} outside ${status.wordCount.min}-${max}`);
+  }
+  if (status.noiseRatio && !status.noiseRatio.ok) {
+    lines.push(`  - noise ratio: ${status.noiseRatio.ratio}`);
+  }
+  return lines;
+}
+
+function renderMarkdown(report) {
   const lines = [
     '# Extraction Parity Report',
     '',
@@ -319,6 +530,12 @@ export function renderMarkdown(report) {
     }
   }
 
+  const qualityDetails = report.results.flatMap(qualityGateLines);
+  if (qualityDetails.length > 0) {
+    lines.push('', '## Quality Gate Details', '');
+    lines.push(...qualityDetails);
+  }
+
   const gaps = metadataGaps(report);
   if (gaps.length > 0) {
     lines.push('', '## Known Limitations', '');
@@ -330,7 +547,7 @@ export function renderMarkdown(report) {
   return `${lines.join('\n')}\n`;
 }
 
-export function buildReport(results) {
+function buildReport(results) {
   const summary = {
     total: results.length,
     parityOrBetter: results.filter((result) => result.status === 'parity-or-better').length,
@@ -349,7 +566,11 @@ export function buildReport(results) {
 async function main() {
   const options = parseArgs();
   await ensureBinaries(options);
-  const corpus = JSON.parse(await readFile(corpusPath, 'utf8'));
+  let corpus = JSON.parse(await readFile(corpusPath, 'utf8'));
+  if (options.cases.length > 0) {
+    const selected = new Set(options.cases);
+    corpus = corpus.filter((testCase) => selected.has(testCase.id));
+  }
   const results = await withFixtureServer(async (baseUrl) => {
     const caseResults = [];
     for (const testCase of corpus) {
@@ -366,7 +587,11 @@ async function main() {
     await writeFile(reportMdPath, renderMarkdown(report));
   }
 
-  console.log(renderMarkdown(report));
+  if (options.jsonOnly) {
+    console.log(JSON.stringify(report, null, 2));
+  } else {
+    console.log(renderMarkdown(report));
+  }
   if (report.summary.chidoriWorse > 0 || report.summary.toolErrors > 0) {
     process.exitCode = 1;
   }
@@ -378,3 +603,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exit(1);
   });
 }
+
+export {
+  buildReport,
+  expectationStatus,
+  normalizeExpectation,
+  noiseRatioStatus,
+  parseArgs,
+  renderMarkdown,
+  wordCountStatus,
+};

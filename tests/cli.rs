@@ -135,6 +135,157 @@ async fn json_outputs_metadata_and_markdown() {
 }
 
 #[tokio::test]
+async fn file_input_extracts_saved_html_with_source_url() {
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("saved.html");
+    std::fs::write(
+        &input_path,
+        r#"
+        <html><head><title>Saved Page</title></head><body>
+          <nav>Saved navigation should not win.</nav>
+          <article>
+            <h1>Saved Investigation</h1>
+            <p>Local HTML should flow through the same extraction pipeline.</p>
+          </article>
+        </body></html>
+        "#,
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg("--file")
+        .arg(&input_path)
+        .arg("--source-url")
+        .arg("https://example.com/saved")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Saved Investigation"))
+        .stdout(predicate::str::contains(
+            "Local HTML should flow through the same extraction pipeline.",
+        ))
+        .stdout(predicate::str::contains("Saved navigation").not())
+        .stderr(predicate::str::is_empty());
+}
+
+#[tokio::test]
+async fn file_input_works_without_source_url() {
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("saved.html");
+    std::fs::write(
+        &input_path,
+        r#"
+        <html><head><title>Saved Page</title></head><body>
+          <nav>Saved navigation should not win.</nav>
+          <article>
+            <h1>Saved Investigation</h1>
+            <p>Local HTML should be inspectable without hidden flags.</p>
+          </article>
+        </body></html>
+        "#,
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg("--file")
+        .arg(&input_path)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Saved Investigation"))
+        .stdout(predicate::str::contains(
+            "Local HTML should be inspectable without hidden flags.",
+        ))
+        .stdout(predicate::str::contains("Saved navigation").not())
+        .stderr(predicate::str::is_empty());
+}
+
+#[tokio::test]
+async fn stdin_input_extracts_html_with_selector_override() {
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg("--stdin")
+        .arg("--source-url")
+        .arg("https://example.com/stdin")
+        .arg("--selector")
+        .arg(".target")
+        .write_stdin(
+            r#"
+            <html><body>
+              <main>
+                <section class="noise"><h1>Wrong Section</h1><p>Noise should be ignored.</p></section>
+                <section class="target"><h1>Selected Section</h1><p>Only this selected node should be extracted.</p></section>
+              </main>
+            </body></html>
+            "#,
+        )
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Selected Section"))
+        .stdout(predicate::str::contains(
+            "Only this selected node should be extracted.",
+        ))
+        .stdout(predicate::str::contains("Wrong Section").not())
+        .stdout(predicate::str::contains("Noise should be ignored").not())
+        .stderr(predicate::str::is_empty());
+}
+
+#[tokio::test]
+async fn stdin_input_works_without_source_url() {
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg("--stdin")
+        .write_stdin(
+            r#"
+            <html><head><title>Saved Page</title></head><body>
+              <article>
+                <h1>Saved Stdin</h1>
+                <p>Standard input should be inspectable without hidden flags.</p>
+              </article>
+            </body></html>
+            "#,
+        )
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Saved Stdin"))
+        .stdout(predicate::str::contains(
+            "Standard input should be inspectable without hidden flags.",
+        ))
+        .stderr(predicate::str::is_empty());
+}
+
+#[tokio::test]
+async fn profile_debug_includes_named_pipeline_timings() {
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("profile.html");
+    std::fs::write(
+        &input_path,
+        r#"
+        <html><head><title>Profile Page</title></head><body>
+          <article><h1>Profile Page</h1><p>Timing diagnostics should include each named pipeline stage.</p></article>
+        </body></html>
+        "#,
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg("--file")
+        .arg(&input_path)
+        .arg("--source-url")
+        .arg("https://example.com/profile")
+        .arg("--json")
+        .arg("--debug")
+        .arg("--profile")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(json["debug"]["profile"]["parseMs"].is_number());
+    assert!(json["debug"]["profile"]["extractMs"].is_number());
+    assert!(json["debug"]["profile"]["standardizeMs"].is_number());
+    assert!(json["debug"]["profile"]["cleanMs"].is_number());
+    assert!(json["debug"]["profile"]["markdownMs"].is_number());
+}
+
+#[tokio::test]
 async fn json_title_falls_back_to_extracted_article_heading() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -437,6 +588,182 @@ This fallback markdown body came from the bot user agent.
         json["debug"]["fallbacks"],
         Value::Array(vec![Value::String("bot-user-agent".to_string())])
     );
+}
+
+#[tokio::test]
+async fn render_auto_debug_reports_renderer_failure_reason() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/spa-shell"))
+        .respond_with(html_response(
+            r#"
+            <html>
+              <head><title>Renderer Shell</title></head>
+              <body>
+                <div id="app"></div>
+                <script>hydrate()</script>
+              </body>
+            </html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/spa-shell", server.uri()))
+        .arg("--render=auto")
+        .arg("--json")
+        .arg("--debug")
+        .env(
+            "CHIDORI_RENDER_COMMAND",
+            "chidori-renderer-command-that-does-not-exist",
+        )
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("renderer"),
+        "expected stderr to mention renderer failure\n\n{stderr}"
+    );
+    assert!(
+        stderr.contains("No such file") || stderr.contains("not found"),
+        "expected stderr to include the spawn failure reason\n\n{stderr}"
+    );
+}
+
+#[tokio::test]
+async fn json_debug_records_renderer_failure_before_bot_fallback() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/renderer-then-bot"))
+        .and(header("user-agent", DEFAULT_USER_AGENT))
+        .respond_with(html_response(
+            r#"<html><head><title>Renderer Then Bot</title></head><body><div id="app"></div><script>hydrate()</script></body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/renderer-then-bot"))
+        .and(header("user-agent", BOT_USER_AGENT))
+        .respond_with(html_response(
+            r#"
+            <html><head><title>Renderer Then Bot</title></head><body>
+              <article>
+                <h1>Renderer Then Bot</h1>
+                <p>The bot fallback should still succeed after the renderer command fails.</p>
+              </article>
+            </body></html>
+            "#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/renderer-then-bot", server.uri()))
+        .arg("--render=auto")
+        .arg("--json")
+        .arg("--debug")
+        .env(
+            "CHIDORI_RENDER_COMMAND",
+            "chidori-renderer-command-that-does-not-exist",
+        )
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["debug"]["fallbacks"][0], "bot-user-agent");
+    let renderer_failures = json["debug"]["rendererFailures"].as_array().unwrap();
+    assert_eq!(renderer_failures.len(), 1);
+    let failure = renderer_failures[0].as_str().unwrap();
+    assert!(failure.contains("renderer"), "{failure}");
+    assert!(
+        failure.contains("No such file") || failure.contains("not found"),
+        "{failure}"
+    );
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn json_debug_does_not_report_renderer_failure_when_rendered_extraction_fails() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/rendered-shell-then-bot"))
+        .and(header("user-agent", DEFAULT_USER_AGENT))
+        .respond_with(html_response(
+            r#"<html><head><title>Rendered Shell Then Bot</title></head><body><div id="app"></div><script>hydrate()</script></body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/rendered-shell-then-bot"))
+        .and(header("user-agent", BOT_USER_AGENT))
+        .respond_with(html_response(
+            r#"
+            <html><head><title>Rendered Shell Then Bot</title></head><body>
+              <article>
+                <h1>Rendered Shell Then Bot</h1>
+                <p>The bot fallback should still succeed after rendered HTML is unextractable.</p>
+              </article>
+            </body></html>
+            "#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let dir = tempdir().unwrap();
+    let renderer = dir.path().join("shell-renderer.sh");
+    std::fs::write(
+        &renderer,
+        r#"#!/bin/sh
+cat <<'HTML'
+<html><head><title>Rendered Shell</title></head><body><div id="root"></div><script>hydrate()</script></body></html>
+HTML
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&renderer).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&renderer, permissions).unwrap();
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    let output = cmd
+        .arg(format!("{}/rendered-shell-then-bot", server.uri()))
+        .arg("--render=auto")
+        .arg("--json")
+        .arg("--debug")
+        .env("CHIDORI_RENDER_COMMAND", &renderer)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["debug"]["fallbacks"][0], "bot-user-agent");
+    assert!(
+        json["debug"]["rendererFailures"].is_null()
+            || json["debug"]["rendererFailures"]
+                .as_array()
+                .is_some_and(Vec::is_empty),
+        "{}",
+        json["debug"]
+    );
+    assert!(json["markdown"]
+        .as_str()
+        .unwrap()
+        .contains("The bot fallback should still succeed"));
 }
 
 #[tokio::test]
@@ -832,6 +1159,37 @@ async fn no_images_removes_image_markdown() {
         .stdout(predicate::str::contains("Text survives."))
         .stdout(predicate::str::contains("Hero image").not())
         .stdout(predicate::str::contains("hero.png").not())
+        .stderr(predicate::str::is_empty());
+}
+
+#[tokio::test]
+async fn no_content_patterns_keeps_pattern_blocks() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/content-patterns"))
+        .respond_with(html_response(
+            r#"
+            <html><body><article>
+              <h1>Pattern Flag Article</h1>
+              <p>Text survives.</p>
+              <section class="newsletter-signup">
+                <h2>Subscribe to our newsletter</h2>
+                <p>Get weekly updates.</p>
+              </section>
+            </article></body></html>
+            "#,
+        ))
+        .mount(&server)
+        .await;
+
+    let mut cmd = Command::cargo_bin("chidori").unwrap();
+    cmd.arg(format!("{}/content-patterns", server.uri()))
+        .arg("--no-content-patterns")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Text survives."))
+        .stdout(predicate::str::contains("Subscribe to our newsletter"))
+        .stdout(predicate::str::contains("Get weekly updates."))
         .stderr(predicate::str::is_empty());
 }
 

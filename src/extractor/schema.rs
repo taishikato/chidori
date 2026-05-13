@@ -1,0 +1,94 @@
+use crate::{document::ParsedDocument, error::ChidoriError};
+use html_escape::encode_text;
+use scraper::Selector;
+
+use super::util::normalize_text;
+
+pub(crate) fn structured_content_candidate(
+    doc: &ParsedDocument,
+    current_word_count: usize,
+) -> Result<Option<String>, ChidoriError> {
+    let Some(content) = crate::metadata::structured_content(doc) else {
+        return Ok(None);
+    };
+    let text = structured_content_plain_text(&content);
+    let structured_word_count = text.split_whitespace().count();
+    if structured_word_count == 0 || structured_word_count * 2 <= current_word_count * 3 {
+        return Ok(None);
+    }
+
+    if let Some(html) = smallest_element_containing_text(doc, &text)? {
+        return Ok(Some(html));
+    }
+
+    Ok(Some(structured_content_fallback_html(&content)))
+}
+
+fn structured_content_plain_text(content: &crate::metadata::StructuredContent) -> String {
+    match content.format {
+        crate::metadata::StructuredContentFormat::PlainText => normalize_text(&content.text),
+        crate::metadata::StructuredContentFormat::Html => {
+            let fragment = scraper::Html::parse_fragment(&content.text);
+            let text =
+                normalize_text(&fragment.root_element().text().collect::<Vec<_>>().join(" "));
+            if text.is_empty() {
+                normalize_text(&content.text)
+            } else {
+                text
+            }
+        }
+    }
+}
+
+fn structured_content_fallback_html(content: &crate::metadata::StructuredContent) -> String {
+    match content.format {
+        crate::metadata::StructuredContentFormat::PlainText => {
+            encode_text(&content.text).to_string()
+        }
+        crate::metadata::StructuredContentFormat::Html => content.text.to_string(),
+    }
+}
+
+fn smallest_element_containing_text(
+    doc: &ParsedDocument,
+    target_text: &str,
+) -> Result<Option<String>, ChidoriError> {
+    let selector =
+        Selector::parse("body *").map_err(|error| ChidoriError::Unknown(error.to_string()))?;
+    let target = normalize_text(target_text);
+    if target.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(doc
+        .dom
+        .select(&selector)
+        .filter(|element| !matches!(element.value().name(), "script" | "style" | "noscript"))
+        .filter_map(|element| {
+            let text = element.text().collect::<Vec<_>>().join(" ");
+            let normalized = normalize_text(&text);
+            normalized
+                .contains(&target)
+                .then(|| (normalized.len(), element.html()))
+        })
+        .min_by_key(|(len, _html)| *len)
+        .map(|(_len, html)| html))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use url::Url;
+
+    #[test]
+    fn smallest_element_containing_text_ignores_empty_normalized_targets() {
+        let doc = ParsedDocument::parse(
+            "<html><body><article><p>Fallback should be used.</p></article></body></html>",
+            Url::parse("https://example.com").unwrap(),
+        );
+
+        let html = smallest_element_containing_text(&doc, "   \n\t ").unwrap();
+
+        assert_eq!(html, None);
+    }
+}

@@ -7,6 +7,18 @@ pub struct CleanOptions {
     pub no_images: bool,
 }
 
+impl CleanOptions {
+    pub fn new(no_images: bool) -> Self {
+        Self { no_images }
+    }
+}
+
+impl Default for CleanOptions {
+    fn default() -> Self {
+        Self::new(false)
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemovalRecord {
@@ -29,11 +41,27 @@ pub fn clean_html(html: &str, options: &CleanOptions) -> String {
 }
 
 pub fn clean_html_with_report(html: &str, options: &CleanOptions) -> CleanResult {
-    clean_html_inner(html, options, true)
+    clean_html_inner(html, options, true, true)
 }
 
 pub fn clean_html_preserving_hidden_with_report(html: &str, options: &CleanOptions) -> CleanResult {
-    clean_html_inner(html, options, false)
+    clean_html_inner(html, options, false, true)
+}
+
+pub fn clean_html_with_report_and_patterns(
+    html: &str,
+    options: &CleanOptions,
+    content_patterns: bool,
+) -> CleanResult {
+    clean_html_inner(html, options, true, content_patterns)
+}
+
+pub fn clean_html_preserving_hidden_with_report_and_patterns(
+    html: &str,
+    options: &CleanOptions,
+    content_patterns: bool,
+) -> CleanResult {
+    clean_html_inner(html, options, false, content_patterns)
 }
 
 fn parse_fragment_document(html: &str) -> kuchiki::NodeRef {
@@ -121,7 +149,12 @@ fn is_void_element(name: &str) -> bool {
     )
 }
 
-fn clean_html_inner(html: &str, options: &CleanOptions, remove_hidden: bool) -> CleanResult {
+fn clean_html_inner(
+    html: &str,
+    options: &CleanOptions,
+    remove_hidden: bool,
+    content_patterns: bool,
+) -> CleanResult {
     let document = parse_fragment_document(html);
     let mut removals = Vec::new();
 
@@ -143,6 +176,9 @@ fn clean_html_inner(html: &str, options: &CleanOptions, remove_hidden: bool) -> 
     }
     unwrap_dom_javascript_links(&document);
     strip_dom_dangerous_attributes(&document);
+    if content_patterns {
+        remove_dom_content_patterns(&document, &mut removals);
+    }
     remove_dom_related_card_sections(&document, &mut removals);
 
     let mut cleaned = serialize_body_inner(&document);
@@ -370,6 +406,343 @@ fn remove_dom_related_card_sections(
         count,
         text_preview,
     });
+}
+
+fn remove_dom_content_patterns(document: &kuchiki::NodeRef, removals: &mut Vec<RemovalRecord>) {
+    remove_dom_content_pattern(
+        document,
+        "section, div, p, ul",
+        "share-widget",
+        is_share_widget_node,
+        removals,
+    );
+    remove_dom_content_pattern(
+        document,
+        "section, div",
+        "newsletter-block",
+        is_newsletter_node,
+        removals,
+    );
+    remove_dom_content_pattern(
+        document,
+        "section, div, p, ul",
+        "tag-category-block",
+        is_tags_node,
+        removals,
+    );
+    remove_dom_content_pattern(
+        document,
+        "section, div, p, ul",
+        "metadata-block",
+        is_metadata_node,
+        removals,
+    );
+}
+
+fn remove_dom_content_pattern(
+    document: &kuchiki::NodeRef,
+    selector: &str,
+    reason: &str,
+    predicate: impl Fn(&kuchiki::NodeRef) -> bool,
+    removals: &mut Vec<RemovalRecord>,
+) {
+    let Ok(matches) = document.select(selector) else {
+        return;
+    };
+    let nodes = matches
+        .filter_map(|matched| predicate(matched.as_node()).then(|| matched.as_node().clone()))
+        .collect::<Vec<_>>();
+    let nodes = deepest_nodes(nodes);
+    let count = nodes.len();
+    if count == 0 {
+        return;
+    }
+    let text_preview = nodes
+        .iter()
+        .map(text_preview_from_node)
+        .find(|preview| !preview.is_empty())
+        .unwrap_or_default();
+    for node in nodes {
+        node.detach();
+    }
+    removals.push(RemovalRecord {
+        step: "clean-html".to_string(),
+        reason: reason.to_string(),
+        selector: selector.to_string(),
+        count,
+        text_preview,
+    });
+}
+
+fn is_share_widget_node(node: &kuchiki::NodeRef) -> bool {
+    let text = normalized_node_text(node);
+    let word_count = word_count(&text);
+    if word_count == 0 || word_count > 35 {
+        return false;
+    }
+
+    let links = node_link_count(node);
+    let has_share_identity = node_attr_tokens(node).any(is_share_token);
+    let has_share_text = contains_any(&text, &["share this", "share article", "share post"]);
+    let has_social_links = links >= 2 && contains_any(&text, &["twitter", "linkedin", "facebook"]);
+
+    (has_share_identity || has_share_text) && (links >= 1 || has_social_links)
+}
+
+fn is_newsletter_node(node: &kuchiki::NodeRef) -> bool {
+    let text = normalized_node_text(node);
+    let word_count = word_count(&text);
+    if word_count == 0 || word_count > 90 {
+        return false;
+    }
+
+    let has_newsletter_identity = node_attr_tokens(node).any(is_newsletter_token);
+    let has_newsletter_text = contains_any(
+        &text,
+        &[
+            "newsletter",
+            "subscribe",
+            "sign up",
+            "inbox",
+            "weekly updates",
+        ],
+    );
+
+    has_newsletter_identity && has_newsletter_text
+}
+
+fn is_tags_node(node: &kuchiki::NodeRef) -> bool {
+    let text = normalized_node_text(node);
+    let word_count = word_count(&text);
+    if word_count == 0 || word_count > 45 {
+        return false;
+    }
+
+    let links = node_link_count(node);
+    let has_tags_identity = node_attr_tokens(node).any(is_tags_token);
+    let has_tags_text = contains_any(&text, &["tags:", "tagged", "categories:", "category:"]);
+
+    has_tags_identity && has_tags_text && (links >= 1 || word_count <= 8)
+}
+
+fn is_metadata_node(node: &kuchiki::NodeRef) -> bool {
+    if node_has_selector(node, "h1, h2, h3, article") {
+        return false;
+    }
+
+    let text = normalized_node_text(node);
+    let word_count = word_count(&text);
+    if word_count == 0 || word_count > 45 {
+        return false;
+    }
+
+    let has_metadata_identity = node_attr_tokens(node).any(is_metadata_token);
+    let cue_count = usize::from(has_byline_cue(&text))
+        + usize::from(has_read_time_cue(&text))
+        + usize::from(has_date_cue(&text));
+
+    if has_metadata_identity && (cue_count >= 1 || word_count <= 8) {
+        return true;
+    }
+
+    (cue_count >= 2)
+        || (word_count <= 4 && has_read_time_cue(&text))
+        || (word_count <= 4 && has_numeric_date_cue(&text))
+}
+
+fn normalized_node_text(node: &kuchiki::NodeRef) -> String {
+    normalize_preview_text(&node.text_contents()).to_ascii_lowercase()
+}
+
+fn word_count(text: &str) -> usize {
+    text.split_whitespace().count()
+}
+
+fn contains_any(text: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| text.contains(needle))
+}
+
+fn node_link_count(node: &kuchiki::NodeRef) -> usize {
+    node.select("a").map_or(0, |links| links.count())
+}
+
+fn node_has_selector(node: &kuchiki::NodeRef, selector: &str) -> bool {
+    node.select(selector)
+        .is_ok_and(|mut matches| matches.next().is_some())
+}
+
+fn node_attr_tokens(node: &kuchiki::NodeRef) -> impl Iterator<Item = String> {
+    let values = node
+        .as_element()
+        .map(|element| {
+            let attrs = element.attributes.borrow();
+            ["class", "id", "role", "aria-label"]
+                .iter()
+                .filter_map(|name| attrs.get(*name).map(ToString::to_string))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    values.into_iter().flat_map(|value| {
+        value
+            .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'))
+            .filter(|token| !token.is_empty())
+            .map(|token| token.to_ascii_lowercase())
+            .collect::<Vec<_>>()
+    })
+}
+
+fn is_share_token(token: String) -> bool {
+    matches!(
+        token.as_str(),
+        "share"
+            | "sharing"
+            | "share-tools"
+            | "share-buttons"
+            | "share-widget"
+            | "social-share"
+            | "article-share"
+            | "post-share"
+            | "sharing-tools"
+    )
+}
+
+fn is_newsletter_token(token: String) -> bool {
+    matches!(
+        token.as_str(),
+        "newsletter"
+            | "newsletter-signup"
+            | "subscribe"
+            | "subscribe-box"
+            | "subscription"
+            | "signup"
+            | "sign-up"
+            | "email-signup"
+    )
+}
+
+fn is_tags_token(token: String) -> bool {
+    matches!(
+        token.as_str(),
+        "tags"
+            | "tag-list"
+            | "post-tags"
+            | "article-tags"
+            | "categories"
+            | "category-list"
+            | "post-categories"
+            | "article-categories"
+    )
+}
+
+fn is_metadata_token(token: String) -> bool {
+    matches!(
+        token.as_str(),
+        "meta"
+            | "metadata"
+            | "article-meta"
+            | "post-meta"
+            | "entry-meta"
+            | "byline"
+            | "dateline"
+            | "read-time"
+            | "reading-time"
+            | "published"
+            | "posted-on"
+            | "author-list"
+            | "authors"
+    )
+}
+
+fn has_byline_cue(text: &str) -> bool {
+    if text.contains("written by") {
+        return true;
+    }
+
+    let Some(rest) = text.strip_prefix("by ") else {
+        return false;
+    };
+    let author_words = rest
+        .split(['·', '|', '-'])
+        .next()
+        .unwrap_or(rest)
+        .split_whitespace()
+        .take(4)
+        .collect::<Vec<_>>();
+
+    !author_words.is_empty()
+        && author_words.len() <= 3
+        && author_words.iter().all(|word| {
+            word.chars()
+                .next()
+                .is_some_and(|ch| ch.is_ascii_alphabetic())
+        })
+}
+
+fn has_read_time_cue(text: &str) -> bool {
+    contains_any(
+        text,
+        &[
+            "min read",
+            "mins read",
+            "minute read",
+            "minutes read",
+            "read time",
+        ],
+    )
+}
+
+fn has_date_cue(text: &str) -> bool {
+    contains_any(
+        text,
+        &[
+            "jan ",
+            "january",
+            "feb ",
+            "february",
+            "mar ",
+            "march",
+            "apr ",
+            "april",
+            "may ",
+            "jun ",
+            "june",
+            "jul ",
+            "july",
+            "aug ",
+            "august",
+            "sep ",
+            "sept ",
+            "september",
+            "oct ",
+            "october",
+            "nov ",
+            "november",
+            "dec ",
+            "december",
+        ],
+    ) || text.split_whitespace().any(|part| {
+        (part.len() == 4 && part.chars().all(|ch| ch.is_ascii_digit()))
+            || looks_like_numeric_date(part)
+    })
+}
+
+fn has_numeric_date_cue(text: &str) -> bool {
+    text.split_whitespace().any(looks_like_numeric_date)
+}
+
+fn looks_like_numeric_date(value: &str) -> bool {
+    let trimmed = value.trim_matches(|ch: char| !ch.is_ascii_alphanumeric());
+    let Some(year) = trimmed.get(0..4) else {
+        return false;
+    };
+    matches!(year.get(0..2), Some("19" | "20"))
+        && year.chars().all(|ch| ch.is_ascii_digit())
+        && trimmed
+            .chars()
+            .filter(|ch| *ch == '-' || *ch == '/')
+            .count()
+            >= 2
 }
 
 fn deepest_nodes(nodes: Vec<kuchiki::NodeRef>) -> Vec<kuchiki::NodeRef> {

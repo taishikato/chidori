@@ -11,7 +11,7 @@ fn fixture_to_markdown(fixture: &str, url: &str) -> String {
     let html = std::fs::read_to_string(format!("tests/fixtures/reference/{fixture}")).unwrap();
     let doc = ParsedDocument::parse(html, Url::parse(url).unwrap());
     let main = extract_main_html(&doc).unwrap();
-    let cleaned = clean_html(&main, &CleanOptions { no_images: false });
+    let cleaned = clean_html(&main, &CleanOptions::new(false));
 
     html_to_markdown(&cleaned, &MarkdownOptions { max_chars: None })
 }
@@ -387,6 +387,177 @@ fn lwn_article_reference_extracts_article_text() {
         ],
     );
     assert_contains_none(&markdown, &["Subscriber comments"]);
+}
+
+#[test]
+fn github_release_reference_extracts_release_notes() {
+    let html =
+        std::fs::read_to_string("tests/fixtures/reference/domain--github-release.html").unwrap();
+    let doc = ParsedDocument::parse(
+        html,
+        Url::parse("https://github.com/chidori-dev/chidori/releases/tag/v1.2.3").unwrap(),
+    );
+    let extracted = extract_main_content(&doc).unwrap();
+    assert_eq!(extracted.selector.as_deref(), Some("github-release"));
+
+    let markdown = fixture_to_markdown(
+        "domain--github-release.html",
+        "https://github.com/chidori-dev/chidori/releases/tag/v1.2.3",
+    );
+
+    assert_contains_all(
+        &markdown,
+        &[
+            "# v1.2.3",
+            "## Highlights",
+            "Renderer diagnostics now report the command failure that prevented hydration.",
+            "Developer site extractors keep release notes useful from terminals.",
+        ],
+    );
+    assert_contains_none(
+        &markdown,
+        &[
+            "Releases Tags",
+            "Compare",
+            "Source code (zip)",
+            "Repository sponsor banner",
+            "Unrelated markdown chrome",
+        ],
+    );
+}
+
+#[test]
+fn github_wiki_reference_extracts_wiki_body() {
+    let html =
+        std::fs::read_to_string("tests/fixtures/reference/domain--github-wiki.html").unwrap();
+    let doc = ParsedDocument::parse(
+        html,
+        Url::parse("https://github.com/chidori-dev/chidori/wiki/Parser-Garden").unwrap(),
+    );
+    let extracted = extract_main_content(&doc).unwrap();
+    assert_eq!(extracted.selector.as_deref(), Some("github-wiki"));
+
+    let markdown = fixture_to_markdown(
+        "domain--github-wiki.html",
+        "https://github.com/chidori-dev/chidori/wiki/Parser-Garden",
+    );
+
+    assert_contains_all(
+        &markdown,
+        &[
+            "# Parser Garden",
+            "The wiki explains how reference fixtures keep extraction behavior stable.",
+            "## Maintenance checklist",
+            "Run focused parity tests before changing selectors.",
+        ],
+    );
+    assert_contains_none(
+        &markdown,
+        &[
+            "Pages",
+            "Clone this wiki locally",
+            "Repository navigation",
+            "Footer links",
+            "Unrelated wiki chrome",
+        ],
+    );
+}
+
+#[test]
+fn discourse_topic_reference_extracts_posts() {
+    let html =
+        std::fs::read_to_string("tests/fixtures/reference/domain--discourse-topic.html").unwrap();
+    let doc = ParsedDocument::parse(
+        html,
+        Url::parse("https://meta.chidori.dev/t/renderer-diagnostics/42").unwrap(),
+    );
+    let extracted = extract_main_content(&doc).unwrap();
+    assert_eq!(extracted.selector.as_deref(), Some("discourse-topic"));
+
+    let markdown = fixture_to_markdown(
+        "domain--discourse-topic.html",
+        "https://meta.chidori.dev/t/renderer-diagnostics/42",
+    );
+
+    assert_contains_all(
+        &markdown,
+        &[
+            "Renderer diagnostics should tell operators why a browser render failed.",
+            "> The first reply confirms the missing executable path is visible in debug output.",
+            "> A second reply adds that topic extraction should keep replies subordinate.",
+        ],
+    );
+    assert_contains_none(
+        &markdown,
+        &[
+            "Log In",
+            "Suggested Topics",
+            "Keyboard shortcuts",
+            "Unrelated roadmap thread",
+        ],
+    );
+    assert_occurs_once(
+        &markdown,
+        "Renderer diagnostics should tell operators why a browser render failed.",
+    );
+}
+
+#[test]
+fn arbitrary_t_path_with_cooked_article_does_not_select_discourse_topic() {
+    let html = r#"
+        <html>
+          <head><title>Cooking Notes</title></head>
+          <body>
+            <article>
+              <h1>Cooking Notes</h1>
+              <div class="cooked">
+                <p>This arbitrary page uses a cooked class but is not a Discourse topic.</p>
+                <p>Generic extraction should keep the article without applying reply formatting.</p>
+              </div>
+            </article>
+          </body>
+        </html>
+    "#;
+    let doc = ParsedDocument::parse(
+        html.to_string(),
+        Url::parse("https://example.com/t/cooking-notes/42").unwrap(),
+    );
+    let extracted = extract_main_content(&doc).unwrap();
+
+    assert_ne!(extracted.selector.as_deref(), Some("discourse-topic"));
+    assert_eq!(extracted.selector.as_deref(), Some("article"));
+    assert!(extracted
+        .html
+        .contains("This arbitrary page uses a cooked class"));
+}
+
+#[test]
+fn discourse_like_body_class_with_generic_cooked_article_does_not_select_discourse_topic() {
+    let html = r#"
+        <html>
+          <head><title>Team Notes</title></head>
+          <body class="discourse-notes">
+            <article>
+              <h1>Team Notes</h1>
+              <div class="cooked">
+                <p>This page has a discourse-like body class and cooked article content.</p>
+                <p>It is still not a Discourse topic without the topic-post structure.</p>
+              </div>
+            </article>
+          </body>
+        </html>
+    "#;
+    let doc = ParsedDocument::parse(
+        html.to_string(),
+        Url::parse("https://example.com/t/team-notes/42").unwrap(),
+    );
+    let extracted = extract_main_content(&doc).unwrap();
+
+    assert_ne!(extracted.selector.as_deref(), Some("discourse-topic"));
+    assert_eq!(extracted.selector.as_deref(), Some("article"));
+    assert!(extracted
+        .html
+        .contains("This page has a discourse-like body class"));
 }
 
 #[test]

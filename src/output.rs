@@ -13,6 +13,8 @@ pub enum RenderMode {
 pub struct DebugDiagnostics {
     pub extraction_path: String,
     pub fallbacks: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub renderer_failures: Vec<String>,
     pub word_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_selector: Option<String>,
@@ -23,16 +25,30 @@ pub struct DebugDiagnostics {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub removals: Vec<crate::cleaner::RemovalRecord>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub standardizations: Vec<crate::standardize::StandardizeRecord>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub candidates: Vec<crate::extractor::ContentCandidateDiagnostic>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub fallback_attempts: Vec<crate::extractor::FallbackAttemptDiagnostic>,
     pub timings: DebugTimings,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<DebugProfile>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DebugTimings {
     pub total_ms: u128,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugProfile {
+    pub parse_ms: u128,
+    pub extract_ms: u128,
+    pub standardize_ms: u128,
+    pub clean_ms: u128,
+    pub markdown_ms: u128,
 }
 
 #[derive(Debug, Serialize)]

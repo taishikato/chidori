@@ -522,5 +522,58 @@
       "Inline recommendation description should not appear",
       "Inline transcript should not appear"
     ]
+  },
+  {
+    "id": "lazy-image-normalization",
+    "fixture": "tests/fixtures/evaluation/elements--lazy-image.html",
+    "sourceUrl": "https://example.com/lazy-image",
+    "category": "dom-standardization",
+    "reference": "local-reference-output",
+    "capability": "recover useful noscript lazy images instead of low-resolution placeholders",
+    "status": "planned",
+    "contains": [
+      "https://miro.medium.com/max/3788/1*5o3M5niyi911waUrKWVZ0Q.png",
+      "Memory leak in action",
+      "![CPU profiling before optimization](https://miro.medium.com/max/2288/1*CANkRN_yzl9tfrGd2F41wQ.png)",
+      "![CPU profiling after optimization](https://miro.medium.com/max/3688/1*EO-pr4RolgcAOj_Uk1rpDA.png)"
+    ],
+    "excludes": ["data:image/svg+xml", "data-src", "https://miro.medium.com/max/60/", "?q=20"],
+    "wordCount": { "min": 5, "max": 250 },
+    "noise": ["data:image/svg+xml", "loading=\"lazy\"", "https://miro.medium.com/max/60/", "?q=20"],
+    "maxNoiseRatio": 0.05
+  },
+  {
+    "id": "noscript-lazy-images",
+    "fixture": "tests/fixtures/evaluation/issues--227-noscript-lazy-images.html",
+    "sourceUrl": "https://example.com/noscript-lazy-images",
+    "category": "dom-standardization",
+    "reference": "local-reference-output",
+    "capability": "recover picture and noscript lazy images without importing base64 placeholders",
+    "status": "planned",
+    "contains": [
+      "![Hero image caption.](https://example.com/images/hero.webp)",
+      "Hero image caption. Photo Credit / Agency",
+      "![First gallery image caption.](https://example.com/images/gallery-1.jpg)",
+      "First gallery image caption. [Source One](https://example.com/source1)",
+      "![Another inline photo.](https://example.com/images/inline-photo-2.jpg)"
+    ],
+    "excludes": ["data:image/svg+xml", "data:image/gif", "base64", "noscript"],
+    "wordCount": { "min": 5, "max": 300 },
+    "noise": ["data:image/svg+xml", "data:image/gif", "base64", "noscript"],
+    "maxNoiseRatio": 0.05
+  },
+  {
+    "id": "iso-date-read-time-cleanup",
+    "fixture": "tests/fixtures/evaluation/content-patterns--iso-date-and-read-time.html",
+    "sourceUrl": "https://example.com/iso-date-read-time",
+    "category": "content-pattern-cleanup",
+    "reference": "local-reference-output",
+    "capability": "remove isolated date/read-time metadata blocks from article body",
+    "status": "planned",
+    "contains": ["#"],
+    "excludes": ["min read", "reading time"],
+    "wordCount": { "min": 20, "max": 500 },
+    "noise": ["min read", "reading time"],
+    "maxNoiseRatio": 0.02
   }
 ]
