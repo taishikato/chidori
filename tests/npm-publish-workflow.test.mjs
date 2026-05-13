@@ -4,7 +4,7 @@ import { test } from "node:test";
 
 const workflowPath = new URL("../.github/workflows/npm-publish.yml", import.meta.url);
 
-test("npm publish workflow publishes scoped platform packages with initial token fallback", () => {
+test("npm publish workflow publishes scoped platform packages with trusted publishing", () => {
   assert.equal(existsSync(workflowPath), true, "missing npm publish workflow");
 
   const workflow = readFileSync(workflowPath, "utf8");
@@ -32,7 +32,7 @@ test("npm publish workflow publishes scoped platform packages with initial token
   assert.match(workflow, /@chidori-fetch\/linux-x64/);
   assert.match(workflow, /@chidori-fetch\/win32-arm64/);
   assert.match(workflow, /@chidori-fetch\/win32-x64/);
-  assert.match(workflow, /NODE_AUTH_TOKEN:\s*\$\{\{ secrets\.NPM_TOKEN \}\}/);
+  assert.doesNotMatch(workflow, /NPM_TOKEN|NODE_AUTH_TOKEN/);
   assert.match(workflow, /node tools\/sync-npm-platform-version\.mjs "\$DRY_RUN_VERSION"/);
   assert.match(
     workflow,
