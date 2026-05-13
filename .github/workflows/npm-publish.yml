@@ -25,7 +25,8 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        # Pinned from actions/checkout@v6. Rotate intentionally for release-path reproducibility.
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
       - name: Install Rust stable
         run: rustup toolchain install stable --profile minimal
@@ -34,14 +35,15 @@ jobs:
         run: rustup default stable
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        # Pinned from actions/setup-node@v6. Rotate intentionally for release-path reproducibility.
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
           package-manager-cache: false
 
       - name: Use npm with trusted publishing support
-        run: npm install -g npm@latest
+        run: npm install -g npm@11.10.0
 
       - name: Verify release branch
         if: ${{ !inputs.dry_run }}
