@@ -17,12 +17,13 @@ const referenceCli = resolve(referenceRoot, 'dist/cli.js');
 const binaryExt = process.platform === 'win32' ? '.exe' : '';
 const chidoriCli = resolve(root, 'target', 'debug', `chidori${binaryExt}`);
 
-function parseArgs() {
-  const argv = process.argv.slice(2);
+function parseArgs(argv = process.argv.slice(2)) {
   const args = new Set(argv);
   const valueAfter = (name) => {
     const index = argv.indexOf(name);
-    return index >= 0 ? argv[index + 1] : undefined;
+    if (index < 0) return undefined;
+    const value = argv[index + 1];
+    return value && !value.startsWith('--') ? value : undefined;
   };
   const cases = valueAfter('--case')
     ?.split(',')
@@ -608,6 +609,7 @@ export {
   expectationStatus,
   normalizeExpectation,
   noiseRatioStatus,
+  parseArgs,
   renderMarkdown,
   wordCountStatus,
 };

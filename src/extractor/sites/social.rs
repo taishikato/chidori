@@ -44,9 +44,7 @@ fn ai_conversation_candidate(doc: &ParsedDocument) -> Result<Option<String>, Chi
         let role = role_element
             .and_then(|element| element.value().attr("data-message-author-role"))
             .unwrap_or("message");
-        let body = role_element
-            .map(|element| element.inner_html())
-            .unwrap_or_else(|| turn.inner_html());
+        let body = turn_body_html(turn, role_element);
         if text_word_count(&body) == 0 {
             continue;
         }
@@ -72,7 +70,50 @@ fn nearest_conversation_parent<'a>(
     element: ElementRef<'a>,
     selector: &Selector,
 ) -> Option<ElementRef<'a>> {
-    element.ancestors().skip(1).find_map(|ancestor| {
+    element.ancestors().find_map(|ancestor| {
         ElementRef::wrap(ancestor).filter(|ancestor| selector.matches(ancestor))
     })
+}
+
+fn turn_body_html(turn: ElementRef<'_>, role_element: Option<ElementRef<'_>>) -> String {
+    let turn_html = turn.inner_html();
+    let Some(role_element) = role_element else {
+        return turn_html;
+    };
+    if role_element == turn {
+        return turn_html;
+    }
+
+    let role_html = role_element.html();
+    turn_html
+        .find(&role_html)
+        .map(|start| turn_html[start..].to_string())
+        .unwrap_or(turn_html)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use url::Url;
+
+    #[test]
+    fn conversation_turn_body_uses_full_turn_when_role_is_nested() {
+        let html = r#"
+        <html><body>
+          <div data-testid="conversation-turn">
+            <div data-message-author-role="user"><span>User label</span></div>
+            <p>The actual user message should stay attached to this turn.</p>
+          </div>
+          <div data-testid="conversation-turn">
+            <div data-message-author-role="assistant"><span>Assistant label</span></div>
+            <p>The assistant answer should also stay attached to this turn.</p>
+          </div>
+        </body></html>"#;
+        let doc = ParsedDocument::parse(html, Url::parse("https://chatgpt.com/c/123").unwrap());
+
+        let output = ai_conversation_candidate(&doc).unwrap().unwrap();
+
+        assert!(output.contains("The actual user message should stay attached"));
+        assert!(output.contains("The assistant answer should also stay attached"));
+    }
 }

@@ -157,7 +157,7 @@ fn is_github_wiki_path(doc: &ParsedDocument) -> bool {
     }
     let segments = github_path_segments(doc);
 
-    segments.len() >= 4 && segments[2] == "wiki" && !segments[3].is_empty()
+    matches!(segments.get(2), Some(&"wiki"))
 }
 
 fn is_github_host(doc: &ParsedDocument) -> bool {
@@ -208,4 +208,20 @@ fn first_inner_html_for_selectors(
     selectors: &[&str],
 ) -> Result<Option<String>, ChidoriError> {
     first_html_for_selectors(doc, selectors)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use url::Url;
+
+    #[test]
+    fn github_wiki_path_accepts_root_wiki_url() {
+        let doc = ParsedDocument::parse(
+            "<html><body></body></html>",
+            Url::parse("https://github.com/owner/repo/wiki").unwrap(),
+        );
+
+        assert!(is_github_wiki_path(&doc));
+    }
 }

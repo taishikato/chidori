@@ -90,19 +90,33 @@ pub struct ExtractionDiagnostics {
 
 #[cfg(test)]
 mod tests {
+    use super::Candidate;
+
     #[test]
     fn diagnostic_record_does_not_clone_candidate_html() {
-        let source = include_str!("types.rs");
-        let diagnostic_record_start = source.find("fn diagnostic_record").unwrap();
-        let diagnostic_record_end = source[diagnostic_record_start..]
-            .find("#[derive(Debug, Clone)]")
-            .map(|offset| diagnostic_record_start + offset)
-            .unwrap();
-        let diagnostic_record_source = &source[diagnostic_record_start..diagnostic_record_end];
+        let candidate = Candidate {
+            diagnostic_id: 7,
+            diagnostic_pass: "primary".to_string(),
+            score: 42,
+            selector_index: 1,
+            selector: "article".to_string(),
+            word_count: 120,
+            content_block_count: 2,
+            html: "<article><p>hello</p></article>".to_string(),
+        };
 
-        assert!(
-            !diagnostic_record_source.contains("..self.clone()"),
-            "{diagnostic_record_source}"
+        let diagnostic = candidate.diagnostic_record();
+
+        assert!(diagnostic.html.is_empty());
+        assert_eq!(diagnostic.diagnostic_id, candidate.diagnostic_id);
+        assert_eq!(diagnostic.diagnostic_pass, candidate.diagnostic_pass);
+        assert_eq!(diagnostic.score, candidate.score);
+        assert_eq!(diagnostic.selector_index, candidate.selector_index);
+        assert_eq!(diagnostic.selector, candidate.selector);
+        assert_eq!(diagnostic.word_count, candidate.word_count);
+        assert_eq!(
+            diagnostic.content_block_count,
+            candidate.content_block_count
         );
     }
 }

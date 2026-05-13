@@ -129,7 +129,7 @@ fn is_supported_html_content_type(content_type: &str) -> bool {
     matches!(media_type.as_str(), "text/html" | "application/xhtml+xml")
 }
 
-fn decode_body(bytes: &[u8], content_type: &str) -> String {
+pub(crate) fn decode_body(bytes: &[u8], content_type: &str) -> String {
     match charset_from_content_type(content_type)
         .or_else(|| charset_from_meta_tag(bytes))
         .as_deref()

@@ -56,6 +56,9 @@ fn smallest_element_containing_text(
     let selector =
         Selector::parse("body *").map_err(|error| ChidoriError::Unknown(error.to_string()))?;
     let target = normalize_text(target_text);
+    if target.is_empty() {
+        return Ok(None);
+    }
 
     Ok(doc
         .dom
@@ -70,4 +73,22 @@ fn smallest_element_containing_text(
         })
         .min_by_key(|(len, _html)| *len)
         .map(|(_len, html)| html))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use url::Url;
+
+    #[test]
+    fn smallest_element_containing_text_ignores_empty_normalized_targets() {
+        let doc = ParsedDocument::parse(
+            "<html><body><article><p>Fallback should be used.</p></article></body></html>",
+            Url::parse("https://example.com").unwrap(),
+        );
+
+        let html = smallest_element_containing_text(&doc, "   \n\t ").unwrap();
+
+        assert_eq!(html, None);
+    }
 }

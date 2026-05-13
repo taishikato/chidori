@@ -1,5 +1,7 @@
 use crate::error::ChidoriError;
-use crate::fetcher::{fetch_url, FetchConfig, FetchedPage, BOT_USER_AGENT, DEFAULT_USER_AGENT};
+use crate::fetcher::{
+    decode_body, fetch_url, FetchConfig, FetchedPage, BOT_USER_AGENT, DEFAULT_USER_AGENT,
+};
 use clap::{Parser, ValueEnum};
 use scraper::Selector;
 use std::fmt;
@@ -183,13 +185,14 @@ async fn load_input(
     match &config.input_source {
         InputSource::Url(url) => fetch_url(url, fetch_config).await,
         InputSource::File(path) => {
-            let body = fs::read_to_string(path).map_err(|error| {
+            let bytes = fs::read(path).map_err(|error| {
                 ChidoriError::FetchFailed(format!(
                     "failed to read input file {}: {}",
                     path.display(),
                     error
                 ))
             })?;
+            let body = decode_body(&bytes, "");
             let final_url = match config.source_url.clone() {
                 Some(source_url) => source_url,
                 None => file_document_url(path)?,
@@ -990,6 +993,7 @@ fn is_low_information_spa_shell(doc: &crate::document::ParsedDocument, markdown:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn windows_process_tree_kill_args_include_tree_and_force_flags() {
@@ -997,5 +1001,36 @@ mod tests {
             windows_process_tree_kill_args(1234),
             vec!["/PID", "1234", "/T", "/F"]
         );
+    }
+
+    #[tokio::test]
+    async fn load_input_decodes_windows_1252_file_using_meta_charset() {
+        let tempdir = tempdir().unwrap();
+        let path = tempdir.path().join("saved.html");
+        fs::write(
+            &path,
+            b"<html><head><meta charset=\"windows-1252\"></head><body><article><p>\x93Saved\x94 HTML</p></article></body></html>",
+        )
+        .unwrap();
+        let config = RunConfig {
+            input_source: InputSource::File(path),
+            json: false,
+            output: None,
+            max_chars: None,
+            timeout: 10_000,
+            user_agent: None,
+            lang: None,
+            no_images: false,
+            content_patterns: true,
+            debug: false,
+            selector: None,
+            profile: false,
+            render: RenderFallback::Off,
+            source_url: None,
+        };
+
+        let page = load_input(&config, &FetchConfig::default()).await.unwrap();
+
+        assert!(page.body.contains("\u{201c}Saved\u{201d} HTML"));
     }
 }

@@ -1,13 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildReport, expectationStatus, noiseRatioStatus, renderMarkdown } from './parity-harness.mjs';
+import { buildReport, expectationStatus, noiseRatioStatus, parseArgs, renderMarkdown } from './parity-harness.mjs';
 
 test('buildReport does not include a dynamic generation timestamp', () => {
   const report = buildReport([]);
 
   assert.equal(Object.hasOwn(report, 'generatedAt'), false);
   assert.equal(renderMarkdown(report).includes('Generated:'), false);
+});
+
+test('parseArgs ignores a missing --case value before another flag', () => {
+  const options = parseArgs(['--case', '--json']);
+
+  assert.deepEqual(options.cases, []);
+  assert.equal(options.jsonOnly, true);
 });
 
 test('renderMarkdown documents metadata gaps separately from open failures', () => {
