@@ -27,7 +27,7 @@ test("npm publish workflow uses trusted publishing instead of npm tokens", () =>
   assert.doesNotMatch(workflow, /npm install -g npm@latest/);
   assert.match(workflow, /npm pack --dry-run/);
   assert.match(workflow, /npm version "\$DRY_RUN_VERSION" --no-git-tag-version/);
-  assert.match(workflow, /npm publish --dry-run/);
+  assert.match(workflow, /npm publish --dry-run --tag dry-run/);
   assert.match(workflow, /npm publish$/m);
   assert.doesNotMatch(workflow, /NPM_TOKEN|NODE_AUTH_TOKEN/);
 });
