@@ -79,7 +79,11 @@ jobs:
 
       - name: Dry-run publish
         if: ${{ inputs.dry_run }}
-        run: npm publish --dry-run
+        run: |
+          CURRENT_VERSION="$(node -p "require('./package.json').version")"
+          DRY_RUN_VERSION="${CURRENT_VERSION}-dry-run.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
+          npm version "$DRY_RUN_VERSION" --no-git-tag-version
+          npm publish --dry-run
 
       - name: Publish to npm
         if: ${{ !inputs.dry_run }}
