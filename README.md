@@ -12,33 +12,125 @@ npx chidori-fetch https://example.com
 
 ## Quick demo
 
-Web pages are built for browsers. Agents usually need the article, not the page
-chrome around it.
-
-```html
-<body>
-  <nav>Docs Pricing Log in</nav>
-  <article>
-    <h1>How Coffee Cools</h1>
-    <p>Coffee cools following Newton's law of cooling.</p>
-    <pre><code>cargo test</code></pre>
-  </article>
-  <aside>Related posts, ads, newsletter forms...</aside>
-</body>
-```
+Web pages are built for browsers. Agents usually need the readable content, not
+the page chrome around it.
 
 ```bash
 npx chidori-fetch https://taishikato.com
 ```
 
 ````md
-# How Coffee Cools
+![profile image](https://taishikato.com/_next/static/media/profile.0cb7aa44.webp)
 
-Coffee cools following Newton's law of cooling.
+I'm Taishi, a fullstack developer and solofounder based in Japan and Canada.
 
-```
-cargo test
-```
+Full-stack dev shipping AI infrastructure & tools to 18K+ users (Supabase hackathon winner). Two of them were ranked as the [#1 Product of the day on Product Hunt](https://www.producthunt.com/products/supavec#supavec).
+
+==========
+
+[Hire me](/cdn-cgi/l/email-protection#493d28203a212067227970797a092e24282025672a2624)
+
+[My Work](/)[Stack](/stack)[Blog](/blog)
+
+[![Supavec](https://taishikato.com/supavec.png)](https://www.supavec.com)
+
+### Supavec ###
+
+OSS RAG as a Service - spin up vector search + chat API in \<5 min. 630▲ Product Hunt, 620⭐ GitHub.
+
+[supavec.com →](https://www.supavec.com)
+
+## AI Tooling & Infrastructure
+
+### [Supavec](https://www.supavec.com) ###
+
+\#RAG#Supabase#OpenSource
+
+Open-source RAG platform using pgvector.
+
+### [MCP Server](https://www.supavec.com/blog/supavec-mcp-server) ###
+
+\#MCP#RAG#OpenSource
+
+MCP server streaming Supabase-secured RAG data to LLMs.
+
+### [CiteAnalytics](https://x.com/supabase/status/1909552555333398630) ###
+
+\#OpenSource#Hackathon
+
+Supabase hackathon winning AI citation analytics app.
+
+## Work Experience
+
+<img alt="Supabase" class="rounded-full w-11 grayscale" height="44" loading="lazy" src="https://taishikato.com/_next/static/media/supabase.92465ed1.webp" width="44">
+
+Supabase
+
+Frontend Developer (contract)Remote
+
+Here are [my PRs](https://github.com/supabase/supabase/issues?q=author%3Ataishikato)
+
+Jul 2025 - Sep 2025
+
+<img alt="Whisperit" class="rounded-full w-11 grayscale" height="44" loading="lazy" src="https://taishikato.com/_next/static/media/whisperit.302305fe.webp" width="44">
+
+Whisperit
+
+Full Stack Developer (freelance)Switzerland (Remote)
+
+Aug 2024 - Jan 2025
+
+<img alt="Semios" class="rounded-full w-11 grayscale" height="44" loading="lazy" src="https://taishikato.com/_next/static/media/semios.1e5ff783.webp" width="44">
+
+Semios
+
+Full Stack JS Developer (full-time)Vancouver
+
+2020 - 2023
+
+<img alt="Yahoo! Japan" class="rounded-full w-11 grayscale" height="44" loading="lazy" src="https://taishikato.com/_next/static/media/yahoo.2fd5bb07.webp" width="44">
+
+Yahoo! Japan
+
+Software Developer (full-time)Tokyo
+
+2015 - 2019
+
+<img alt="btrax" class="rounded-full w-11 grayscale" height="44" loading="lazy" src="https://taishikato.com/_next/static/media/btrax.204b56b0.webp" width="44">
+
+btrax
+
+Software Developer (intern)San Francisco
+
+Apr 2013 - Jun 2013
+
+## Hackathon Wins
+
+[Supabase Hackathon for Launch Week 14 Winner Apr 2025](https://x.com/supabase/status/1909552555333398630)
+
+[Supabase Hackathon for Launch Week 6 Runner Up - Best Storage Project Jan 2023](https://supabase.com/blog/launch-week-6-hackathon-winners#runner-up-2)
+
+[Supabase Hackathon for Launch Week 5 Winner - Most Visually Pleasing Aug 2022](https://supabase.com/blog/launch-week-5-hackathon-winners#winner-1)
+
+## OSS Contributions
+
+[Pull Request #79 · supabase/embeddings-generator](https://github.com/supabase/embeddings-generator/pull/79)
+
+[Pull Request #137 · langchain-ai/langchain-community](https://github.com/langchain-ai/langchain-community/pull/137)
+
+[Pull Request #30 · ueberdosis/tiptap-docs](https://github.com/ueberdosis/tiptap-docs/pull/30)
+
+[Pull Request #60822 · vercel/next.js](https://github.com/vercel/next.js/pull/60822)
+
+[Pull Request #19009 · supabase/supabase](https://github.com/supabase/supabase/pull/19009)
+
+[Pull Request #340 · modal-labs/modal-examples](https://github.com/modal-labs/modal-examples/pull/340)
+
+[Pull Request #1799 · nuxt/docs](https://github.com/nuxt/docs/pull/1799)
+
+[Pull Request #1797 · nuxt/docs](https://github.com/nuxt/docs/pull/1797)
+
+[Pull Request #24589 · nodejs/node](https://github.com/nodejs/node/pull/24589)
 ````
 
 That output can go straight into an agent prompt, a RAG ingestion job, a note, or
