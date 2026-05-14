@@ -3004,6 +3004,20 @@ fn unwraps_soft_wrapped_paragraphs_without_breaking_setext_headings() {
 }
 
 #[test]
+fn normalizes_closed_atx_headings_from_html2md() {
+    let html = r##"
+    <article>
+      <h3> Heading</h3>
+      <p>Short body.</p>
+    </article>"##;
+
+    let markdown = html_to_markdown(html, &MarkdownOptions { max_chars: None });
+
+    assert!(markdown.contains("### Heading"), "{markdown}");
+    assert!(!markdown.contains("###  Heading ###"), "{markdown}");
+}
+
+#[test]
 fn unwraps_soft_wrapped_paragraphs_without_flattening_br_breaks() {
     let html = r#"
     <article>

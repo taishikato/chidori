@@ -20,6 +20,7 @@ pub fn html_to_markdown(html: &str, options: &MarkdownOptions) -> String {
     markdown = unwrap_soft_wrapped_paragraphs(&markdown);
     markdown = collapse_multiline_link_labels(&markdown);
     markdown = normalize_setext_headings(&markdown);
+    markdown = normalize_closed_atx_headings(&markdown);
     markdown = annotate_code_fences(&markdown, &code_block_languages);
     markdown = specialized.restore(markdown);
 
@@ -1077,6 +1078,54 @@ fn normalize_setext_headings(markdown: &str) -> String {
     }
 
     normalized.join("\n")
+}
+
+fn normalize_closed_atx_headings(markdown: &str) -> String {
+    let mut normalized = Vec::new();
+    let mut in_fence = false;
+
+    for line in markdown.lines() {
+        if is_backtick_fence(line) {
+            in_fence = !in_fence;
+            normalized.push(line.to_string());
+            continue;
+        }
+
+        if in_fence {
+            normalized.push(line.to_string());
+        } else {
+            normalized.push(normalize_closed_atx_heading_line(line));
+        }
+    }
+
+    normalized.join("\n")
+}
+
+fn normalize_closed_atx_heading_line(line: &str) -> String {
+    let leading = line.len() - line.trim_start().len();
+    let trimmed = &line[leading..];
+    let level = trimmed.chars().take_while(|ch| *ch == '#').count();
+    if !(1..=6).contains(&level) || !trimmed[level..].starts_with(char::is_whitespace) {
+        return line.to_string();
+    }
+
+    let content = trimmed[level..].trim();
+    let closing = content.chars().rev().take_while(|ch| *ch == '#').count();
+    if closing == 0 {
+        return line.to_string();
+    }
+
+    let before_closing = &content[..content.len() - closing];
+    if !before_closing.ends_with(char::is_whitespace) {
+        return line.to_string();
+    }
+
+    let text = before_closing.trim();
+    if text.is_empty() {
+        return line.to_string();
+    }
+
+    format!("{}{} {}", &line[..leading], "#".repeat(level), text)
 }
 
 fn is_backtick_fence(line: &str) -> bool {
