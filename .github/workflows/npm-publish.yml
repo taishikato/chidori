@@ -96,7 +96,7 @@ jobs:
               ;;
           esac
 
-      - name: Verify package versions are unpublished
+      - name: Report package publication status
         if: ${{ steps.release-mode.outputs.publish == 'true' }}
         run: |
           VERSION="$(node -p "require('./package.json').version")"
@@ -111,8 +111,9 @@ jobs:
 
           while IFS= read -r PACKAGE; do
             if npm view "$PACKAGE@$VERSION" version >/dev/null 2>&1; then
-              echo "$PACKAGE@$VERSION is already published."
-              exit 1
+              echo "$PACKAGE@$VERSION is already published and will be skipped where possible."
+            else
+              echo "$PACKAGE@$VERSION is unpublished."
             fi
           done <<< "$PACKAGES"
 
@@ -187,6 +188,20 @@ jobs:
       - name: Use npm with trusted publishing support
         run: npm install -g npm@11.10.0
 
+      - name: Check platform package publication
+        id: platform-version
+        if: ${{ needs.verify.outputs.publish == 'true' }}
+        shell: bash
+        run: |
+          VERSION="$(node -p "require('./npm/${{ matrix.path }}/package.json').version")"
+          if npm view "${{ matrix.package }}@$VERSION" version >/dev/null 2>&1; then
+            echo "${{ matrix.package }}@$VERSION is already published."
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "${{ matrix.package }}@$VERSION is unpublished."
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Use dry-run package version
         if: ${{ needs.verify.outputs.dry_run == 'true' }}
         shell: bash
@@ -196,12 +211,15 @@ jobs:
           node tools/sync-npm-platform-version.mjs "$DRY_RUN_VERSION"
 
       - name: Build native binary
+        if: ${{ needs.verify.outputs.dry_run == 'true' || steps.platform-version.outputs.published != 'true' }}
         run: cargo build --release
 
       - name: Prepare platform package
+        if: ${{ needs.verify.outputs.dry_run == 'true' || steps.platform-version.outputs.published != 'true' }}
         run: node tools/prepare-platform-package.mjs --package "${{ matrix.package }}" --directory "${{ matrix.path }}" --binary "target/release/${{ matrix.binary }}"
 
       - name: Preview platform package contents
+        if: ${{ needs.verify.outputs.dry_run == 'true' || steps.platform-version.outputs.published != 'true' }}
         run: npm pack "./npm/${{ matrix.path }}" --dry-run
 
       - name: Dry-run platform publish
@@ -209,12 +227,14 @@ jobs:
         run: npm publish "./npm/${{ matrix.path }}" --dry-run --tag dry-run --access public
 
       - name: Publish platform package
-        if: ${{ needs.verify.outputs.publish == 'true' }}
+        if: ${{ needs.verify.outputs.publish == 'true' && steps.platform-version.outputs.published != 'true' }}
         run: npm publish "./npm/${{ matrix.path }}" --access public
 
   publish-main-package:
     name: Publish chidori-fetch
-    needs: publish-platform-packages
+    needs:
+      - verify
+      - publish-platform-packages
     runs-on: ubuntu-latest
     environment: npm-publish
 
@@ -234,6 +254,20 @@ jobs:
       - name: Use npm with trusted publishing support
         run: npm install -g npm@11.10.0
 
+      - name: Check root package publication
+        id: root-version
+        if: ${{ needs.verify.outputs.publish == 'true' }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          PACKAGE="$(node -p "require('./package.json').name")"
+          if npm view "$PACKAGE@$VERSION" version >/dev/null 2>&1; then
+            echo "$PACKAGE@$VERSION is already published."
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "$PACKAGE@$VERSION is unpublished."
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Use dry-run package version
         if: ${{ needs.verify.outputs.dry_run == 'true' }}
         run: |
@@ -250,5 +284,5 @@ jobs:
         run: npm publish --dry-run --tag dry-run
 
       - name: Publish to npm
-        if: ${{ needs.verify.outputs.publish == 'true' }}
+        if: ${{ needs.verify.outputs.publish == 'true' && steps.root-version.outputs.published != 'true' }}
         run: npm publish

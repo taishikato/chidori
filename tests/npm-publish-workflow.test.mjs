@@ -38,6 +38,7 @@ test("npm publish workflow publishes scoped platform packages with trusted publi
   assert.doesNotMatch(workflow, /uses:\s*actions\/(?:checkout|setup-node)@v\d+/);
   assert.doesNotMatch(workflow, /npm install -g npm@latest/);
   assert.match(workflow, /npm pack --dry-run/);
+  assert.match(workflow, /publish-main-package:\n\s+name: Publish chidori-fetch\n\s+needs:\n\s+- verify\n\s+- publish-platform-packages/);
   assert.match(workflow, /@chidori-fetch\/darwin-arm64/);
   assert.match(workflow, /@chidori-fetch\/darwin-x64/);
   assert.match(workflow, /@chidori-fetch\/linux-arm64/);
@@ -50,8 +51,14 @@ test("npm publish workflow publishes scoped platform packages with trusted publi
     workflow,
     /node tools\/prepare-platform-package\.mjs --package "\$\{\{ matrix\.package \}\}" --directory "\$\{\{ matrix\.path \}\}" --binary "target\/release\/\$\{\{ matrix\.binary \}\}"/,
   );
+  assert.match(workflow, /Check platform package publication/);
+  assert.match(workflow, /Check root package publication/);
   assert.match(workflow, /if:\s*\$\{\{ needs\.verify\.outputs\.dry_run == 'true' \}\}/);
   assert.match(workflow, /if:\s*\$\{\{ needs\.verify\.outputs\.publish == 'true' \}\}/);
+  assert.match(
+    workflow,
+    /if:\s*\$\{\{ needs\.verify\.outputs\.publish == 'true' && steps\.root-version\.outputs\.published != 'true' \}\}/,
+  );
   assert.match(workflow, /npm publish "\.\/npm\/\$\{\{ matrix\.path \}\}" --dry-run --tag dry-run --access public/);
   assert.match(workflow, /npm publish "\.\/npm\/\$\{\{ matrix\.path \}\}" --access public/);
   assert.match(workflow, /npm version "\$DRY_RUN_VERSION" --no-git-tag-version/);
