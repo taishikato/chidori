@@ -30,12 +30,12 @@
     "test:tools": "node --test tools/*.test.mjs"
   },
   "optionalDependencies": {
-    "@chidori-fetch/darwin-arm64": "0.1.8",
-    "@chidori-fetch/darwin-x64": "0.1.8",
-    "@chidori-fetch/linux-arm64": "0.1.8",
-    "@chidori-fetch/linux-x64": "0.1.8",
-    "@chidori-fetch/win32-arm64": "0.1.8",
-    "@chidori-fetch/win32-x64": "0.1.8"
+    "@chidori-fetch/darwin-arm64": "0.1.9",
+    "@chidori-fetch/darwin-x64": "0.1.9",
+    "@chidori-fetch/linux-arm64": "0.1.9",
+    "@chidori-fetch/linux-x64": "0.1.9",
+    "@chidori-fetch/win32-arm64": "0.1.9",
+    "@chidori-fetch/win32-x64": "0.1.9"
   },
   "keywords": [
     "markdown",

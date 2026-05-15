@@ -1,6 +1,6 @@
 {
   "name": "@chidori-fetch/darwin-arm64",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Prebuilt chidori-fetch binary for macOS arm64",
   "homepage": "https://github.com/taishikato/chidori#readme",
   "repository": {
